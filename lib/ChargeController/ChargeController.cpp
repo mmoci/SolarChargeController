@@ -2,9 +2,6 @@
 
 void ChargeController::init()
 {
-    m_pvSensor.init();
-    m_batterySensor.init();
-
     m_batteryManager.init(BatteryConfig::LI_ION_3S_DEFAULT);
     m_mpptController.init();
 }
@@ -13,21 +10,21 @@ void ChargeController::update()
 {
     int pwmDuty{};
 
-    m_pvSensor.update();
-    m_batterySensor.update();
-
-    Measurements pvMeasurements{m_pvSensor.getVoltage_mV(), m_pvSensor.getCurrent_mA()};
-    Measurements batteryMeasurements{m_batterySensor.getVoltage_mV(), m_batterySensor.getCurrent_mA()};
+    Measurements pvMeasurements{m_pvMeasurements->getVoltage_mV(), m_pvMeasurements->getCurrent_mA()};
+    Measurements batteryMeasurements{m_batteryMeasurements->getVoltage_mV(), m_batteryMeasurements->getCurrent_mA()};
 
     handlePvPowerUnavailableTimer(pvMeasurements.voltage_mV * pvMeasurements.current_mA);
 
+    // In DPS mode, pvMeasurements represent output-side power
     m_mpptController.update(pvMeasurements);
+
     pwmDuty = m_mpptController.getRequestedPwmDuty();
+    pwmDuty = std::min(pwmDuty, m_lastPwmDuty + ChargeControllerConfig::MAX_PWM_SOFT_STEP); // Prevents sudden jumps - PI soft recovery
 
     m_batteryManager.update(batteryMeasurements, isChargingAvailable());
     if(!m_batteryManager.isChargingAllowed())
     {
-        m_dcConverter.setPwmDuty(0);
+        m_actuator->applyControl(0);
         return;
     }
 
@@ -35,7 +32,7 @@ void ChargeController::update()
     {
         if(auto currentLimit = m_batteryManager.getMaxChargingCurrentLimit())
         {
-            pwmDuty = clampCurrentLimit(batteryMeasurements.current_mA, *currentLimit, pwmDuty);
+            pwmDuty = clampLimitPI(batteryMeasurements.current_mA, *currentLimit, pwmDuty, m_currentIntegralError);
         }
     }
 
@@ -43,11 +40,12 @@ void ChargeController::update()
     {
         if(auto voltageLimit = m_batteryManager.getMaxVoltageLimit())
         {
-            pwmDuty = clampVoltageLimit(batteryMeasurements.voltage_mV, *voltageLimit, pwmDuty);
+            pwmDuty = clampLimitPI(batteryMeasurements.voltage_mV, *voltageLimit, pwmDuty, m_voltageIntegralError);
         }
     }
 
-    m_dcConverter.setPwmDuty(pwmDuty);
+    m_lastPwmDuty = pwmDuty;
+    m_actuator->applyControl(pwmDuty);
 }
 
 bool ChargeController::isChargingAvailable()
@@ -70,28 +68,35 @@ void ChargeController::handlePvPowerUnavailableTimer(long pvPower_mW)
     m_pvPower_mW = pvPower_mW;
 }
 
-int ChargeController::clampCurrentLimit(int batteryCurrent, int currentLimit, int pwmDuty)
+int ChargeController::clampLimit(int measured, int limit, int pwmDuty)
 {
-    if (batteryCurrent <= 0) return pwmDuty;
+    if (measured <= 0) return pwmDuty;
 
-    int deltaCurrent = batteryCurrent - currentLimit;
+    int deltaCurrent = measured - limit;
     
     if(deltaCurrent <= 0) return pwmDuty;
 
-    int pwmCorrection = std::lround((static_cast<double>(pwmDuty) / batteryCurrent) * deltaCurrent);
+    int pwmCorrection = std::lround((static_cast<double>(pwmDuty) / measured) * deltaCurrent);
 
     return constrain(pwmDuty - pwmCorrection, 0, DcConverterConfig::MAX_PWM_DUTY);
 }
 
-int ChargeController::clampVoltageLimit(int batteryVoltage, int voltageLimit, int pwmDuty)
+int ChargeController::clampLimitPI(int measured, int limit, int pwmDuty, long& integralError)
 {
-    if (batteryVoltage <= 0) return pwmDuty;
+    if (measured <= 0) return pwmDuty;
 
-    int deltaVoltage = batteryVoltage - voltageLimit;
+    int error = measured - limit;
     
-    if(deltaVoltage <= 0) return pwmDuty;
+    if(error <= 0) 
+    {
+        integralError = 0;
+        return pwmDuty;
+    }
 
-    int pwmCorrection = std::lround((static_cast<double>(pwmDuty) / batteryVoltage) * deltaVoltage);
-    
+    // Used PI (Proportional & Integral) method for compensation as gives better results than linear approach 
+    integralError += error;
+    integralError = constrain(integralError, 0L, ChargeControllerConfig::MAX_INTEGRAL_ERROR);
+    int pwmCorrection = static_cast<int>(std::roundl(ChargeControllerConfig::Kp * error + ChargeControllerConfig::Ki * integralError));
+
     return constrain(pwmDuty - pwmCorrection, 0, DcConverterConfig::MAX_PWM_DUTY);
 }

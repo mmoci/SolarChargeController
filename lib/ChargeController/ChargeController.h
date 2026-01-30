@@ -1,31 +1,43 @@
 #pragma once
-#include "SensorINA226.h"
+#include <memory>
+#include "MeasurementsIf.h" 
+#include "ActuatorIf.h"
 #include "MpptController.h"
 #include "BatteryManager.h"
-#include "DcConverter.h"
+#include "Config.h"
 
 class ChargeController
 {
     public:
-    ChargeController(uint16_t pvSensorAddress, uint16_t batterySensorAddress, uint8_t pwmPin) :  
-        m_pvSensor{pvSensorAddress}, m_batterySensor{batterySensorAddress}, m_dcConverter{pwmPin}
+    ChargeController(MeasurementsIf* pvMeasurements, MeasurementsIf* batteryMeasurements, ActuatorIf* actuator) :
+        m_pvMeasurements{pvMeasurements},
+        m_batteryMeasurements{batteryMeasurements},
+        m_actuator{actuator}
     {}
 
     void init();
     void update();
 
     private:
-    SensorINA226 m_pvSensor;
-    SensorINA226 m_batterySensor;
-    DcConverter m_dcConverter;
+    MeasurementsIf* m_pvMeasurements{};
+    MeasurementsIf* m_batteryMeasurements{};
+    ActuatorIf*     m_actuator{};
     BatteryManager m_batteryManager{};
     MpptController m_mpptController{};
 
+    // Used to determine is charging available (PV power)
     long m_pvPower_mW{};
     Timer m_pvPowerUnavailableTimer{};
 
+    // PI (Proportional & Integral) variables containing cumulative integral error
+    long m_voltageIntegralError{};
+    long m_currentIntegralError{};
+
+    // Last value for PWM duty cycle
+    int m_lastPwmDuty{};
+
     bool isChargingAvailable();
     void handlePvPowerUnavailableTimer(long pvPower_mW);
-    int clampCurrentLimit(int batteryCurrent, int currentLimit, int pwmDuty);
-    int clampVoltageLimit(int batteryVoltage, int voltageLimit, int pwmDuty);
+    int clampLimit(int measured, int limit, int pwmDuty);
+    int clampLimitPI(int measured, int limit, int pwmDuty, long& integralError);
 };

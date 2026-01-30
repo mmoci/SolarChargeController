@@ -9,16 +9,16 @@ class Timer
     unsigned long duration{};
 
     public:
-    void trigger()
-    {
-        start = millis();
-        duration = 0;
-    }
-
     void reset()
     {
         start = 0;
         duration = 0;
+    }
+
+    void trigger()
+    {
+        reset();
+        start = millis();
     }
 
     void update()
@@ -29,6 +29,11 @@ class Timer
             return;
         }
         duration = millis() - start;
+    }
+
+    bool active()
+    {
+        return start;
     }
 
     unsigned long getDuration() const {return duration;}

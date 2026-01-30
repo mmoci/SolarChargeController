@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Sensor.h"
+#include <Arduino.h>
 #include <Wire.h>
 
 class SensorI2C

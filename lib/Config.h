@@ -17,6 +17,12 @@ namespace ChargeControllerConfig
 {
     static constexpr long PV_POWER_THRESHOLD {1000}; // 1W, When PV power is less or equal to 1W consider PV power unavailable (i.e. to small for charging)
     static constexpr long PV_POWER_UNAVAILABLE_TIMEOUT {10000}; // 10sec, When PV power is unavailable for 10sec, set isChargingAvailable to false
+
+    static constexpr double Kp {1.0};
+    static constexpr double Ki {0.01};
+    static constexpr long   MAX_INTEGRAL_ERROR {500};
+    
+    static constexpr int    MAX_PWM_SOFT_STEP {5};
 }
 
 namespace DcConverterConfig

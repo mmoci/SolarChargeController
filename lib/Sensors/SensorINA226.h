@@ -1,12 +1,39 @@
 #pragma once
 
 #include "Config.h"
+#include "Device.h"
 #include "SensorI2C.h"
-#include "CurrentSensor.h"
-#include "VoltageSensor.h"
+#include "MeasurementsIf.h"
 
-class SensorINA226 : public SensorI2C, public CurrentSensor, public VoltageSensor
+class SensorINA226 : public Device, public SensorI2C, public MeasurementsIf
 {
+    public:
+    SensorINA226(uint16_t deviceAddress, int shunt_mOhm = SensorConfig::SensorINA226::PV_SHUNT_mOhm);
+
+    /**
+     * @brief Provides basic setup for the sensor during Arduino setup phase.
+     */
+    void init() override;
+
+    /**
+     * @brief Provides sensor update during Arduino loop execution.
+     */
+    void update() override;
+
+    /**
+     * @brief Get the Current
+     * 
+     * @return int Returns current value in [mA]
+     */
+    int getCurrent_mA() const override {return m_current_mA;};
+
+    /**
+     * @brief Get the Bus Voltage
+     * 
+     * @return int Returns Bus Voltage values in [mV]
+     */
+    int getVoltage_mV() const override {return m_voltage_mV;}
+
     private:
     /**
      * @brief Represents current value per 1bit. 
@@ -51,31 +78,4 @@ class SensorINA226 : public SensorI2C, public CurrentSensor, public VoltageSenso
 
     void configureCalibration();
     void setConfiguration();
-
-    public:
-    SensorINA226(uint16_t deviceAddress, int shunt_mOhm = SensorConfig::SensorINA226::PV_SHUNT_mOhm);
-
-    /**
-     * @brief Provides basic setup for the sensor during Arduino setup phase.
-     */
-    void init() override;
-
-    /**
-     * @brief Provides sensor update during Arduino loop execution.
-     */
-    void update() override;
-
-    /**
-     * @brief Get the Current
-     * 
-     * @return int Returns current value in [mA]
-     */
-    int getCurrent_mA() const override {return m_current_mA;};
-
-    /**
-     * @brief Get the Bus Voltage
-     * 
-     * @return int Returns Bus Voltage values in [mV]
-     */
-    int getVoltage_mV() const override {return m_voltage_mV;}
 };

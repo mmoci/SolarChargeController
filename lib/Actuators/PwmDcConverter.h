@@ -1,14 +1,15 @@
 #pragma once
 
 #include "Device.h"
+#include "ActuatorIf.h"
 #include <cmath>
 #include "Config.h"
 
-class DcConverter : public Device
+class PwmDcConverter : public Device, public ActuatorIf
 {
     public:
-    DcConverter(uint8_t pin, int ledChannel = DcConverterConfig::DEFAULT_LED_CHANNEL, int frequency = DcConverterConfig::DEFAULT_FREQUENCY, int resolution = DcConverterConfig::DEFAULT_RESOLUTION) : 
-        Device(pin),
+    PwmDcConverter(uint8_t pin, int ledChannel = DcConverterConfig::DEFAULT_LED_CHANNEL, int frequency = DcConverterConfig::DEFAULT_FREQUENCY, int resolution = DcConverterConfig::DEFAULT_RESOLUTION) : 
+        m_pin{pin},
         m_ledChannel{ledChannel},
         m_frequency{frequency},
         m_resolution{resolution},
@@ -17,7 +18,7 @@ class DcConverter : public Device
 
     void init() override;
     void update() override;
-    void setPwmDuty(int pwm)
+    void applyControl(int pwm)
     {
         if(pwm != m_pwm)
         {
@@ -34,7 +35,7 @@ class DcConverter : public Device
     int m_pwm{};
 };
 
-inline void DcConverter::init()
+inline void PwmDcConverter::init()
 {
     // Configure PWM functionality
     ledcSetup(m_ledChannel, m_frequency, m_resolution);
@@ -49,5 +50,5 @@ inline void DcConverter::init()
     #endif
 }
 
-inline void DcConverter::update()
+inline void PwmDcConverter::update()
 {}
