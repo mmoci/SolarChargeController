@@ -21,18 +21,7 @@ namespace ChargeControllerConfig
     static constexpr double Kp {1.0};
     static constexpr double Ki {0.01};
     static constexpr long   MAX_INTEGRAL_ERROR {500};
-    
-    static constexpr int    MAX_PWM_SOFT_STEP {5};
-}
-
-namespace DcConverterConfig
-{
-    static constexpr int DEFAULT_RESOLUTION  {8}; // bits
-    static constexpr int DEFAULT_LED_CHANNEL {0};
-    static constexpr int DEFAULT_FREQUENCY   {10000};
-
-    inline static int MAX_PWM_DUTY           {static_cast<int>(std::roundl(std::pow(2, DEFAULT_RESOLUTION)))};
-    inline static int DEFAULT_PWM_DUTY       {MAX_PWM_DUTY / 2};
+    static constexpr int    MAX_CONTROL_SOFT_STEP {5};
 }
 
 namespace BatteryConfig

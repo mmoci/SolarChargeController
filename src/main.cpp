@@ -3,6 +3,7 @@
 #include "SensorINA226.h"      // Concrete sensor
 #include "PwmDcConverter.h"    // Concrete PWM actuator
 #include "DPSxDcConverter.h"   // Concrete DPS actuator
+#include "DPSxMeasurements.h"
 
 static constexpr uint8_t I2C_SCL_PIN             {22};
 static constexpr uint8_t I2C_SDA_PIN             {21};
@@ -12,12 +13,14 @@ static constexpr uint8_t  PWM_PIN                {32};
 
 #ifdef DPS_DC_CONVERTER
     DPSxDcConverter dpsDcConverter{};
+    DPSxMeasurements pvMeasurements{&dpsDcConverter, DPSxMeasurements::MeasurementSource::Input};
+    DPSxMeasurements batteryMeasurements{&dpsDcConverter, DPSxMeasurements::MeasurementSource::Output};
    
-    // If you have a PV sensor, use SensorINA226 here instead of Null
-    NullSensor pvSensor{}; 
-    //SensorINA226 pvSensor{PV_SENSOR_ADDRESS};
+    // If you have a PV sensor SensorINA226 here
+    // NullSensor pvSensor{}; 
+    // SensorINA226 pvSensor{PV_SENSOR_ADDRESS};
     
-    ChargeController controller{&pvSensor, &dpsDcConverter, &dpsDcConverter};
+    ChargeController controller{&pvMeasurements, &batteryMeasurements, &dpsDcConverter};
 #else
     SensorINA226 pvSensor{PV_SENSOR_ADDRESS};
     SensorINA226 batterySensor{BATTERY_SENSOR_ADDRESS};

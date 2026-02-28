@@ -3,12 +3,21 @@
 class ActuatorIf
 {
 public:
+    enum class ControlMode
+    {
+        DUTY_CYCLE,
+        VOLTAGE_SETPOINT,
+        CURRENT_SETPOINT
+    };
+
     // Apply a control value decided by ChargeController
     virtual void applyControl(int controlValue) = 0;
 
-    // Optional: bounds of valid control range - we'll see about this
-    //virtual int minControl() const = 0;
-    //virtual int maxControl() const = 0;
-
+    // Actuator capabilities
+    virtual ControlMode getControlMode() const = 0;
+    virtual int getMinControl() const = 0;
+    virtual int getMaxControl() const = 0;
+    virtual bool hasMeasurements() const = 0;
+    
     virtual ~ActuatorIf() = default;
 };

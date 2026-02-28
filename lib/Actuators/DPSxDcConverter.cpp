@@ -3,46 +3,86 @@
 void DPSxDcConverter::init()
 {
     m_messageState = ModbusState::IDLE;
-    m_pendigMessageType = ModbusMessageType::READ;
-    m_lastMessageType = ModbusMessageType::NONE;
+    m_writeMessagePending = false;
+    m_activeMessageType = ModbusMessageType::NONE;
+    m_readsSinceLastWrite = 0;
     m_messageTimer.reset();
 }
 
 void DPSxDcConverter::update()
 {
-    if(m_messageState == ModbusState::IDLE)
-    {
-        if(m_pendigMessageType == ModbusMessageType::WRITE && m_lastMessageType != ModbusMessageType::WRITE)
-        {
-            //setCurrent(m_controlValue);
-        }
-        else
-            updateVoltageAndCurrentData();
-    }
+    handleModbusMessages();
 }
 
 void DPSxDcConverter::applyControl(int controlValue) 
 {
-    if(m_controlValue != controlValue)
+    auto setPointValue{static_cast<int>(std::round(controlValue * getMaxControl() / 100.0))};
+    
+    if(m_setPointValue != setPointValue)
     {
-        m_controlValue = controlValue;
-        m_pendigMessageType = ModbusMessageType::WRITE;
+        m_setPointValue = setPointValue;
+        m_writeMessagePending = true;
     }
 }
 
-void DPSxDcConverter::updateVoltageAndCurrentData()
+ActuatorIf::ControlMode DPSxDcConverter::getControlMode() const
 {
-    const uint16_t nrOfRegisters = 4;
+    return m_controlMode;
+}
+
+int DPSxDcConverter::getMinControl() const
+{
+    return 0;
+}
+
+int DPSxDcConverter::getMaxControl() const
+{
+    return DPSxDcConverterConfig::MAX_MPPT_CONTROL_VALUE;
+}
+
+bool DPSxDcConverter::hasMeasurements() const
+{
+    return true;
+}
+
+void DPSxDcConverter::handleModbusMessages()
+{
+    const uint16_t nrOfRegisters{NUM_OF_REGISTERS_TO_READ};
 
     switch(m_messageState)
     {
         case ModbusState::IDLE:
-        m_lastMessageType = ModbusMessageType::READ;
-        clearRxLine();
-        if(sendRegisterReadReq(Register::UOUT, nrOfRegisters) != FRAME_SIZE)
+        if(m_writeMessagePending && m_readsSinceLastWrite >= MAX_READS_BEFORE_WRITE)
         {
-            m_messageState = ModbusState::ERROR;
-            break;
+            m_activeMessageType = ModbusMessageType::WRITE;
+            m_readsSinceLastWrite = 0;
+        }
+        else
+        {
+            m_activeMessageType = ModbusMessageType::READ;
+            ++m_readsSinceLastWrite;
+        }
+            
+        clearRxLine();
+
+        // sendRegisterReadReq and sendRegisterWriteReq coud be joined into same function, they have same signiture.
+        // Difference is that sendRegisterReadReq requires nrOfRegisters while other requires data to be written
+        if(m_activeMessageType == ModbusMessageType::READ)
+        {
+            if(sendRegisterReadReq(Register::UOUT, nrOfRegisters) != FRAME_SIZE)
+            {
+                m_messageState = ModbusState::ERROR;
+                break;
+            }
+        }
+        else
+        {
+            auto registerAddress {selectRegisterType()};
+            if(sendRegisterWriteReq(registerAddress, m_setPointValue) != FRAME_SIZE)
+            {
+                m_messageState = ModbusState::ERROR;
+                break;
+            }
         }
             
         m_messageState = ModbusState::WAITING;
@@ -53,16 +93,33 @@ void DPSxDcConverter::updateVoltageAndCurrentData()
         {
             m_messageTimer.update();
 
-            std::vector<uint16_t> results{receiveRegisterReadRsp(nrOfRegisters)};
-            if(!results.empty())
+            if(m_activeMessageType == ModbusMessageType::READ)
             {
-                m_outVoltage_mV = results[0] * 1000;
-                m_outCurrent_mA = results[1] * 1000;
-                m_inVoltage_mV  = results[3] * 1000;
-                m_messageState = ModbusState::IDLE;
-                m_messageTimer.reset();
+                std::vector<uint16_t> buffer{receiveRegisterReadRsp(nrOfRegisters)};
+                if(!buffer.empty())
+                {
+                    m_outVoltage_mV = buffer[0] * 1000;
+                    m_outCurrent_mA = buffer[1] * 1000;
+                    m_inVoltage_mV  = buffer[3] * 1000;
+
+                    m_messageState = ModbusState::IDLE;
+                    m_messageTimer.reset();
+                    break;
+                }
             }
-            else if(m_messageTimer.getDuration() >= MESSAGE_TMO)
+            else
+            {
+                auto registerAddress {selectRegisterType()};
+                if(receiveRegisterWriteRsp(registerAddress, m_setPointValue))
+                {
+                    m_writeMessagePending = false;
+                    m_messageState = ModbusState::IDLE;
+                    m_messageTimer.reset();
+                    break;
+                }
+            }
+
+            if(m_messageTimer.getDuration() >= MESSAGE_TMO)
             {
                 m_messageState = ModbusState::ERROR;
             }
@@ -75,17 +132,6 @@ void DPSxDcConverter::updateVoltageAndCurrentData()
         m_messageTimer.reset();
         break;
     }
-}
-
-void DPSxDcConverter::setOutputCurrent()
-{
-    // TODO Function should implement state machine. It is important that it sets 
-    // m_lastMessageType = ModbusMessageType::WRITE; could we before invoking actual write
-    // and it needs to remove ModbusMessageType::WRITE from m_pendigMessageType
-    // m_pendigMessageType = ModbusMessageType::READ;
-    // In updateVoltageAndCurrentData() we do not change m_pendigMessageType as we want that m_pendigMessageType is 
-    // always ModbusMessageType::READ unless there is a specific request for writting received through applyControl().
-    // we could cover this using std::queue probably
 }
 
 std::size_t DPSxDcConverter::sendRegisterReadReq(Register startAddress, uint16_t nrOfRegisters, uint8_t slaveAddress)
@@ -205,7 +251,7 @@ void DPSxDcConverter::createFrame(uint8_t* buffer, Register startAddress,  Funct
 
 void DPSxDcConverter::appendCRC16Bytes(uint8_t* buffer, uint16_t size)
 {
-    uint16_t crcBytes {computeCRC16Bytes(buffer, size)};
+    uint16_t crcBytes {computeModbusCRC16(buffer, size)};
 
     buffer[size] = static_cast<uint8_t>(crcBytes & 0xFF);
     buffer[size + 1] = static_cast<uint8_t>((crcBytes >> 8) & 0xFF);
@@ -213,11 +259,11 @@ void DPSxDcConverter::appendCRC16Bytes(uint8_t* buffer, uint16_t size)
 
 bool DPSxDcConverter::verifyCRC16(uint8_t* buffer, uint16_t size)
 {
-    auto crcBytes{computeCRC16Bytes(buffer, size)};
+    auto crcBytes{computeModbusCRC16(buffer, size)};
     return crcBytes == 0x0000;
 }
 
-uint16_t DPSxDcConverter::computeCRC16Bytes(uint8_t* buffer, uint16_t size)
+uint16_t DPSxDcConverter::computeModbusCRC16(uint8_t* buffer, uint16_t size)
 {
     // Modbus uses 2 bytes for CRC with default value 0xFFFF
     uint16_t crcBytes {CRC16_DEFAULT_VALUE};
@@ -227,9 +273,10 @@ uint16_t DPSxDcConverter::computeCRC16Bytes(uint8_t* buffer, uint16_t size)
     {
         crcBytes ^= buffer[byte];
 
+        // Iterate over all bits in the current byte
         for(uint8_t i{0}; i < 8; ++i)
         {
-            if(crcBytes & 0x00001)
+            if(crcBytes & 0x0001)
             {
                 crcBytes >>= static_cast<uint16_t>(1);
                 crcBytes ^= static_cast<uint16_t>(CRC16_POLYNOMIAL_VALUE);
@@ -241,49 +288,7 @@ uint16_t DPSxDcConverter::computeCRC16Bytes(uint8_t* buffer, uint16_t size)
     return crcBytes;
 }
 
-
-// NOT USED, WILL BE REMOVED LATTER
-
-/*
-bool DPSxDcConverter::readRegister(Register address, uint16_t& result, uint8_t slaveAddress)
+DPSxDcConverter::Register DPSxDcConverter::selectRegisterType()
 {
-    std::vector<uint16_t> results{};
-    result = results[0];
-    return readRegisters(address, results, 1, slaveAddress);
+    return (m_controlMode == ControlMode::CURRENT_SETPOINT) ? Register::I_SET : Register::U_SET;
 }
-
-bool DPSxDcConverter::readRegisters(Register startAddress, std::vector<uint16_t>& results, uint16_t nrOfRegisters, uint8_t slaveAddress)
-{
-    if(sendRegisterReadReq(startAddress, nrOfRegisters, slaveAddress) != FRAME_SIZE)
-        return false;
-
-    unsigned long start {millis()};
-    while(millis() - start < MESSAGE_TMO)
-    {
-        auto values {receiveRegisterReadRsp(slaveAddress, nrOfRegisters)};
-
-        if(!values.empty())
-        {
-            results = std::move(values);
-            return true;
-        }
-        delay(1);
-    }
-    return false;
-}
-
-bool DPSxDcConverter::writeRegister(Register address, uint16_t data, uint8_t slaveAddress)
-{
-    if(sendRegisterWriteReq(address, data, slaveAddress) != FRAME_SIZE)
-        return false;
-
-    unsigned long start {millis()};
-    while(millis() - start < MESSAGE_TMO)
-    {
-        if(receiveRegisterWriteRsp(address, data, slaveAddress)) 
-            return true;
-        delay(1);
-    }
-    return false;
-}
-*/

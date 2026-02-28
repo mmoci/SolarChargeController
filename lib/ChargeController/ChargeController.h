@@ -34,10 +34,10 @@ class ChargeController
     long m_currentIntegralError{};
 
     // Last value for PWM duty cycle
-    int m_lastPwmDuty{};
+    int m_mpptControl{};
 
     bool isChargingAvailable();
     void handlePvPowerUnavailableTimer(long pvPower_mW);
-    int clampLimit(int measured, int limit, int pwmDuty);
-    int clampLimitPI(int measured, int limit, int pwmDuty, long& integralError);
+    int clampLimit(int measured, int limit, int mpptControl);
+    int clampLimitPI(int measured, int limit, int mpptControl, long& integralError);
 };

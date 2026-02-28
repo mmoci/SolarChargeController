@@ -1,19 +1,56 @@
+#pragma once
+
 #include "Device.h"
 #include "ActuatorIf.h"
-#include "MeasurementsIf.h"
 #include "Utility.h"
 
-class DPSxDcConverter : public Device, public ActuatorIf, public MeasurementsIf
+namespace DPSxDcConverterConfig
+{
+    static constexpr ActuatorIf::ControlMode CONTROL_MODE {ActuatorIf::ControlMode::VOLTAGE_SETPOINT};
+    static constexpr int MAX_MPPT_VOLTAGE_CONTROL_VALUE   {60000}; // Represents max voltage = 60V
+    static constexpr int MAX_MPPT_CURRENT_CONTROL_VALUE   {5000}; // Represents max current = 5A
+
+    constexpr int selectControlValueFromControlMode()
+    {
+        if constexpr (CONTROL_MODE == ActuatorIf::ControlMode::VOLTAGE_SETPOINT) 
+            return MAX_MPPT_VOLTAGE_CONTROL_VALUE;
+        else if constexpr (CONTROL_MODE == ActuatorIf::ControlMode::CURRENT_SETPOINT)
+            return MAX_MPPT_CURRENT_CONTROL_VALUE;
+        else
+        {
+            static_assert(true, "Unsupported control mode");
+            return 0;
+        }    
+    }   
+
+    static constexpr int MAX_MPPT_CONTROL_VALUE     {selectControlValueFromControlMode()};
+    static constexpr int DEFAULT_MPPT_CONTROL_VALUE {MAX_MPPT_CONTROL_VALUE / 2};
+}
+
+/**
+ * Important timing note:
+ * - Modbus latency: ~50-100ms per read/write cycle
+ * - This creates ~100ms feedback delay for voltage adjustment
+ * - ChargeController soft ramp (5 units/cycle) is NOT appropriate for this latency
+ * - Recommend: Increase MAX_CONTROL_SOFT_STEP to 1 or 2 for DPS variant
+ */
+class DPSxDcConverter : public Device, public ActuatorIf
 {
     public:
+    // Device overrides
     void init() override;
     void update() override;
-    int getInVoltage_mV() const {return m_inVoltage_mV;}
-    int getVoltage_mV() const override {return m_outVoltage_mV;};
-    int getCurrent_mA() const override {return m_outCurrent_mA;};
-
-    // Apply a control value decided by ChargeController
+    
+    // ActuatorIf overrides
+    ControlMode getControlMode() const override;
+    int getMinControl() const override;
+    int getMaxControl() const override;
+    bool hasMeasurements() const override;
     void applyControl(int controlValue) override;
+    
+    int getInVoltage_mV() const {return m_inVoltage_mV;}
+    int getVoltage_mV() const {return m_outVoltage_mV;};
+    int getCurrent_mA() const {return m_outCurrent_mA;};
 
     private:
     enum class Register : uint16_t
@@ -50,13 +87,15 @@ class DPSxDcConverter : public Device, public ActuatorIf, public MeasurementsIf
         WRITE
     };
 
+    ControlMode m_controlMode{DPSxDcConverterConfig::CONTROL_MODE};
     int m_inVoltage_mV{};
     int m_outVoltage_mV{};
     int m_outCurrent_mA{};
-    int m_controlValue{};
+    int m_setPointValue{};
     ModbusState m_messageState{};
-    ModbusMessageType m_pendigMessageType{};
-    ModbusMessageType m_lastMessageType{};
+    ModbusMessageType m_activeMessageType{};
+    bool m_writeMessagePending{};
+    uint8_t m_readsSinceLastWrite{};
     Timer m_messageTimer{};
 
     static constexpr uint8_t  SLAVE_ADDRESS {0xFF};
@@ -64,53 +103,14 @@ class DPSxDcConverter : public Device, public ActuatorIf, public MeasurementsIf
     static constexpr uint16_t CRC16_POLYNOMIAL_VALUE {0xA001};
     static constexpr uint16_t FRAME_SIZE {8}; // bytes
     static constexpr uint16_t MESSAGE_TMO {100}; // milliseconds
+    static constexpr uint8_t  NUM_OF_REGISTERS_TO_READ {4};
+    static constexpr uint8_t  MAX_READS_BEFORE_WRITE {3};
 
     /**
      * @brief 
      * 
      */
-    void updateVoltageAndCurrentData();
-
-    /**
-     * @brief 
-     * 
-     */
-    void setOutputCurrent();
-
-    /**
-     * @brief 
-     * 
-     * @param address 
-     * @param results 
-     * @param nrOfRegisters 
-     * @param slaveAddress 
-     * @return true 
-     * @return false 
-     */
-    bool readRegister(Register address, uint16_t& result, uint8_t slaveAddress = SLAVE_ADDRESS);
-
-    /**
-     * @brief 
-     * 
-     * @param startAddress 
-     * @param results 
-     * @param nrOfRegisters 
-     * @param slaveAddress 
-     * @return true 
-     * @return false 
-     */
-    bool readRegisters(Register startAddress, std::vector<uint16_t>& results, uint16_t nrOfRegisters, uint8_t slaveAddress = SLAVE_ADDRESS);
-
-    /**
-     * @brief 
-     * 
-     * @param address 
-     * @param data 
-     * @param slaveAddress 
-     * @return true 
-     * @return false 
-     */
-    bool writeRegister(Register address, uint16_t data, uint8_t slaveAddress = SLAVE_ADDRESS);
+    void handleModbusMessages();
 
     /**
      * @brief Synchronous, blocking with timeout is the correct first design...
@@ -197,5 +197,13 @@ class DPSxDcConverter : public Device, public ActuatorIf, public MeasurementsIf
      * @param size Size of the array
      * @return uint16_t computed CRC bytes
      */
-    uint16_t computeCRC16Bytes(uint8_t* buffer, uint16_t size);
+    uint16_t computeModbusCRC16(uint8_t* buffer, uint16_t size);
+
+    /**
+     * @brief 
+     * 
+     * @param controlMode 
+     * @return Register 
+     */
+    Register selectRegisterType();
 };
