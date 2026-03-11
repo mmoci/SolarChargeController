@@ -6,11 +6,27 @@ void DPSxDcConverter::init()
     m_writeMessagePending = false;
     m_activeMessageType = ModbusMessageType::NONE;
     m_readsSinceLastWrite = 0;
+    m_lastUpdateTime = 0;
+    m_consecutiveErrors = 0;
+    m_pauseRetrying = false;
+    m_errorRecoveryTimer.reset();
     m_messageTimer.reset();
 }
 
 void DPSxDcConverter::update()
 {
+    if(m_pauseRetrying)
+    {
+        m_errorRecoveryTimer.update();
+        if(m_errorRecoveryTimer.getDuration() >= ERROR_RECOVERY_TMO)
+        {
+            Serial.println("[DPSxDcConverter] Resuming communication attempts after pause.");
+            m_pauseRetrying = false;
+            m_errorRecoveryTimer.reset();
+        }
+        return;
+    }
+
     handleModbusMessages();
 }
 
@@ -65,13 +81,15 @@ void DPSxDcConverter::handleModbusMessages()
             
         clearRxLine();
 
-        // sendRegisterReadReq and sendRegisterWriteReq coud be joined into same function, they have same signiture.
+        // sendRegisterReadReq and sendRegisterWriteReq could be joined into same function, they have same signiture.
         // Difference is that sendRegisterReadReq requires nrOfRegisters while other requires data to be written
         if(m_activeMessageType == ModbusMessageType::READ)
         {
             if(sendRegisterReadReq(Register::UOUT, nrOfRegisters) != FRAME_SIZE)
             {
                 m_messageState = ModbusState::ERROR;
+                ++m_consecutiveErrors;
+                Serial.println(String("[DPSxDcConverter] Failed to send read request (error #") + m_consecutiveErrors + ")");
                 break;
             }
         }
@@ -81,6 +99,8 @@ void DPSxDcConverter::handleModbusMessages()
             if(sendRegisterWriteReq(registerAddress, m_setPointValue) != FRAME_SIZE)
             {
                 m_messageState = ModbusState::ERROR;
+                ++m_consecutiveErrors;
+                Serial.println(String("[DPSxDcConverter] Failed to send write request (error #") + m_consecutiveErrors + ")");
                 break;
             }
         }
@@ -102,6 +122,8 @@ void DPSxDcConverter::handleModbusMessages()
                     m_outCurrent_mA = buffer[1] * 1000;
                     m_inVoltage_mV  = buffer[3] * 1000;
 
+                    m_consecutiveErrors = 0; // Reset error count on successful read
+                    m_lastUpdateTime = millis(); // Update last successful read time
                     m_messageState = ModbusState::IDLE;
                     m_messageTimer.reset();
                     break;
@@ -113,6 +135,8 @@ void DPSxDcConverter::handleModbusMessages()
                 if(receiveRegisterWriteRsp(registerAddress, m_setPointValue))
                 {
                     m_writeMessagePending = false;
+                    m_consecutiveErrors = 0; // Reset error count on successful write
+                    m_lastUpdateTime = millis(); // Update last successful write time
                     m_messageState = ModbusState::IDLE;
                     m_messageTimer.reset();
                     break;
@@ -122,12 +146,19 @@ void DPSxDcConverter::handleModbusMessages()
             if(m_messageTimer.getDuration() >= MESSAGE_TMO)
             {
                 m_messageState = ModbusState::ERROR;
+                ++m_consecutiveErrors;
+                Serial.println(String("[DPSxDcConverter] Message timeout (error #") + m_consecutiveErrors + ")");
             }
             break;
         }
 
         case ModbusState::ERROR:
-        Serial.println("[DPSxDcConverter]: Voltage and current update failed!");
+        if(m_consecutiveErrors >= CONSECUTIVE_ERRORS_THRESHOLD)
+        {
+            Serial.println("[DPSxDcConverter] Too many consecutive errors: " + String(m_consecutiveErrors) + ". Pause connection...");
+            m_pauseRetrying = true;
+            m_consecutiveErrors = 0;
+        }
         m_messageState = ModbusState::IDLE;
         m_messageTimer.reset();
         break;

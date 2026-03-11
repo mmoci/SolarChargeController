@@ -40,4 +40,5 @@ class ChargeController
     void handlePvPowerUnavailableTimer(long pvPower_mW);
     int clampLimit(int measured, int limit, int mpptControl);
     int clampLimitPI(int measured, int limit, int mpptControl, long& integralError);
+    int softRampControl(int targetControl, int stepSize);
 };

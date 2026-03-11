@@ -6,6 +6,8 @@
 class DPSxMeasurements : public MeasurementsIf
 {
     public:
+    static constexpr uint32_t MEASUREMENT_STALE_TIMEOUT_MS {500};  // 500ms without update = stale
+
     enum class MeasurementSource
     {
         Input,
@@ -34,6 +36,20 @@ class DPSxMeasurements : public MeasurementsIf
         // Both input and output report the same current on DPS (series connection)
         return p_dpsConverter->getCurrent_mA();
     };
+
+    bool isMeasurementValid() const override
+    {
+        // Check if DPS device has valid measurements
+        if (!p_dpsConverter->hasMeasurements())
+            return false;
+
+        return lastTimeUpdated() < MEASUREMENT_STALE_TIMEOUT_MS;
+    }
+
+    virtual unsigned long lastTimeUpdated() const override 
+    {
+        return millis() - p_dpsConverter->getLastUpdateTime();
+    }
 
     private:
     DPSxDcConverter* p_dpsConverter;

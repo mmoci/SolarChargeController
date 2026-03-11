@@ -15,17 +15,27 @@ void ChargeController::update()
     Measurements pvMeasurements{m_pvMeasurements->getVoltage_mV(), m_pvMeasurements->getCurrent_mA()};
     Measurements batteryMeasurements{m_batteryMeasurements->getVoltage_mV(), m_batteryMeasurements->getCurrent_mA()};
 
-    handlePvPowerUnavailableTimer(pvMeasurements.voltage_mV * pvMeasurements.current_mA);
+    if(!m_pvMeasurements->isMeasurementValid())
+    {
+        Serial.println("[ChargeController] WARNING: PV measurements are stale!");
+        mpptControl = m_mpptControl;  // Maintain last known control to prevent sudden jumps when measurements are stale, but don't reset to 0 to allow soft recovery when PV measurements become valid again
+    }
+    else if(!m_batteryMeasurements->isMeasurementValid())
+    {
+        Serial.println("[ChargeController] WARNING: Battery measurements are stale!");
+        mpptControl = std::max(0, m_mpptControl - 10);  // Reduce charging current to prevent potential overcharging when battery measurements are unavailable
+    }
+    else
+    {
+        handlePvPowerUnavailableTimer(pvMeasurements.voltage_mV * pvMeasurements.current_mA);
 
-    m_mpptController.update(pvMeasurements);
+        m_mpptController.update(pvMeasurements);
 
-    mpptControl = m_mpptController.getRequestedOutput();
+        mpptControl = m_mpptController.getRequestedOutput();
 
-    // Prevents sudden jumps - PI soft recovery
-    if(mpptControl > m_mpptControl)
-        mpptControl = std::min(mpptControl, m_mpptControl + ChargeControllerConfig::MAX_CONTROL_SOFT_STEP);
-    else if(mpptControl < m_mpptControl)
-        mpptControl = std::max(mpptControl, m_mpptControl - ChargeControllerConfig::MAX_CONTROL_SOFT_STEP);
+        // Implements a soft ramping mechanism for the MPPT control value. The soft ramping is applied on every update to ensure smooth transitions in control output.
+        mpptControl = softRampControl(mpptControl, ChargeControllerConfig::MAX_CONTROL_SOFT_STEP);
+    }
 
     m_batteryManager.update(batteryMeasurements, isChargingAvailable());
 
@@ -85,7 +95,7 @@ int ChargeController::clampLimit(int measured, int limit, int mpptControl)
 
     int mpptControlCorrection = std::lround((static_cast<double>(mpptControl) / measured) * deltaCurrent);
 
-    return constrain(mpptControl - mpptControlCorrection, MpptController::MIN_CONTROL_VALUE, MpptController::MAX_CONTROL_VALUE);
+    return constrain(mpptControl - mpptControlCorrection, 0, 100);
 }
 
 int ChargeController::clampLimitPI(int measured, int limit, int mpptControl, long& integralError)
@@ -106,5 +116,14 @@ int ChargeController::clampLimitPI(int measured, int limit, int mpptControl, lon
     integralError = constrain(integralError, 0L, ChargeControllerConfig::MAX_INTEGRAL_ERROR);
     int mpptControlCorrection = static_cast<int>(std::roundl(ChargeControllerConfig::Kp * error + ChargeControllerConfig::Ki * integralError));
 
-    return constrain(mpptControl - mpptControlCorrection, MpptController::MIN_CONTROL_VALUE, MpptController::MAX_CONTROL_VALUE);
+    return constrain(mpptControl - mpptControlCorrection, 0, 100);
+}
+
+int ChargeController::softRampControl(int targetControl, int stepSize)
+{
+    if(targetControl > m_mpptControl)
+            return std::min(targetControl, m_mpptControl + stepSize);
+    else if(targetControl < m_mpptControl)
+            return std::max(targetControl, m_mpptControl - stepSize);
+    return targetControl;
 }

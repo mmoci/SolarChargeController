@@ -51,6 +51,7 @@ class DPSxDcConverter : public Device, public ActuatorIf
     int getInVoltage_mV() const {return m_inVoltage_mV;}
     int getVoltage_mV() const {return m_outVoltage_mV;};
     int getCurrent_mA() const {return m_outCurrent_mA;};
+    unsigned long getLastUpdateTime() const {return m_lastUpdateTime;};
 
     private:
     enum class Register : uint16_t
@@ -87,6 +88,18 @@ class DPSxDcConverter : public Device, public ActuatorIf
         WRITE
     };
 
+    // ===== Configuration =====
+    static constexpr uint8_t  SLAVE_ADDRESS {0xFF};
+    static constexpr uint16_t CRC16_DEFAULT_VALUE {0xFFFF};
+    static constexpr uint16_t CRC16_POLYNOMIAL_VALUE {0xA001};
+    static constexpr uint16_t FRAME_SIZE {8}; // bytes
+    static constexpr uint16_t MESSAGE_TMO {100}; // milliseconds
+    static constexpr uint8_t  NUM_OF_REGISTERS_TO_READ {4};
+    static constexpr uint8_t  MAX_READS_BEFORE_WRITE {3};
+    static constexpr uint16_t ERROR_RECOVERY_TMO {5000}; // milliseconds
+    static constexpr uint8_t  CONSECUTIVE_ERRORS_THRESHOLD {5};
+
+    // ===== State Variables =====
     ControlMode m_controlMode{DPSxDcConverterConfig::CONTROL_MODE};
     int m_inVoltage_mV{};
     int m_outVoltage_mV{};
@@ -98,13 +111,11 @@ class DPSxDcConverter : public Device, public ActuatorIf
     uint8_t m_readsSinceLastWrite{};
     Timer m_messageTimer{};
 
-    static constexpr uint8_t  SLAVE_ADDRESS {0xFF};
-    static constexpr uint16_t CRC16_DEFAULT_VALUE {0xFFFF};
-    static constexpr uint16_t CRC16_POLYNOMIAL_VALUE {0xA001};
-    static constexpr uint16_t FRAME_SIZE {8}; // bytes
-    static constexpr uint16_t MESSAGE_TMO {100}; // milliseconds
-    static constexpr uint8_t  NUM_OF_REGISTERS_TO_READ {4};
-    static constexpr uint8_t  MAX_READS_BEFORE_WRITE {3};
+    // ===== Error Recovery Variables =====
+    unsigned long m_lastUpdateTime{};
+    int m_consecutiveErrors{};
+    bool m_pauseRetrying{};
+    Timer m_errorRecoveryTimer{};
 
     /**
      * @brief 
