@@ -1,4 +1,5 @@
 #include "PwmDcConverter.h"
+#include "Arduino.h"
 
 PwmDcConverter::PwmDcConverter(uint8_t pin, int ledChannel, int frequency, int resolution) : 
     m_pin{pin},

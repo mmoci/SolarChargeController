@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include <optional>
 #include "BatteryProfile.h"
 #include "Utility.h"
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <vector>
 #include "Device.h"
 #include "ActuatorIf.h"
 #include "Utility.h"

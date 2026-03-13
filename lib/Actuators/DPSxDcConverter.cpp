@@ -1,4 +1,5 @@
 #include "DPSxDcConverter.h"
+#include "Arduino.h"
 
 void DPSxDcConverter::init()
 {
