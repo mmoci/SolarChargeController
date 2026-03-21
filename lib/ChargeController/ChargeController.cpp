@@ -2,9 +2,9 @@
 #include "DPSxDcConverter.h"
 #include "PwmDcConverter.h"
 
-void ChargeController::init()
+void ChargeController::init(const BatteryProfile& batteryProfile)
 {
-    m_batteryManager.init(BatteryConfig::LI_ION_3S_DEFAULT);
+    m_batteryManager.init(batteryProfile);
     m_mpptController.init();
 }
 

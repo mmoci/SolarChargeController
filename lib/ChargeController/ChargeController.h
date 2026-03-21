@@ -15,7 +15,7 @@ class ChargeController
         m_actuator{actuator}
     {}
 
-    void init();
+    void init(const BatteryProfile& batteryProfile);
     void update();
 
     private:

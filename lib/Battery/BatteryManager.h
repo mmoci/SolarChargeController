@@ -8,23 +8,14 @@
 class BatteryManager
 {
     public:
-    /**
-     * @brief Contains different charging states:
-     *        Idle	    Charging not allowed
-     *        Precharge	Charging allowed with very low current
-     *        CC        Charging allowed with max current
-     *        CV	    Charging allowed with voltage clamp
-     *        Done	    Charging not allowed (battery full)
-     *        Fault	    Charging not allowed (safety)
-     */
     enum class Mode
     {
-        Idle,
-        Precharge,
-        CC,
-        CV,
-        Done,
-        Fault
+        Idle,       // No charging, battery is idle
+        Precharge,  // Charging allowed with very low current, when battery voltage is below precharge voltage limit
+        CC,         // Charging allowed with max current, when battery voltage is above precharge voltage limit and below max voltage limit
+        CV,         // Charging allowed with voltage clamp, when battery voltage is above max voltage limit
+        Done,       // Charging not allowed (battery full)
+        Fault       // Charging not allowed (safety)
     };
 
     /**

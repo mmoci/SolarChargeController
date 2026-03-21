@@ -107,7 +107,7 @@ void BatteryManager::handleCvMode(const Measurements& batteryMeasurements, bool 
     {
         m_mode = Mode::Idle;
     }
-    else if(batteryVoltage >= m_profile.maxVoltage_mV && batteryVoltage <= m_profile.cutoffCurrent_mA)
+    else if(batteryVoltage >= m_profile.maxVoltage_mV && batteryCurrent <= m_profile.cutoffCurrent_mA)
     {
         m_mode = Mode::Done;
     }

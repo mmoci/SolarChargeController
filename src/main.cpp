@@ -6,8 +6,6 @@
 
 static constexpr uint8_t I2C_SCL_PIN             {22};
 static constexpr uint8_t I2C_SDA_PIN             {21};
-static constexpr uint16_t PV_SENSOR_ADDRESS      {0x40};
-static constexpr uint16_t BATTERY_SENSOR_ADDRESS {0x41};
 static constexpr uint8_t  PWM_PIN                {32};
 
 #ifdef DPS_DC_CONVERTER
@@ -16,8 +14,8 @@ static constexpr uint8_t  PWM_PIN                {32};
     DPSxMeasurements batteryMeasurements{&dpsDcConverter, DPSxMeasurements::MeasurementSource::Output};
     ChargeController controller{&pvMeasurements, &batteryMeasurements, &dpsDcConverter};
 #else
-    SensorINA226 pvSensor{PV_SENSOR_ADDRESS};
-    SensorINA226 batterySensor{BATTERY_SENSOR_ADDRESS};
+    SensorINA226 pvSensor{SensorConfig::PV_SENSOR_DEVICE_ADDRESS};
+    SensorINA226 batterySensor{SensorConfig::BATTERY_SENSOR_DEVICE_ADDRESS};
     PwmDcConverter pwmActuator{PWM_PIN};
     ChargeController controller{&pvSensor, &batterySensor, &pwmActuator};
 #endif

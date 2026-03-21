@@ -142,7 +142,14 @@ Mock implementations provided for testing without hardware.
 - [ ] Program configuration registry for dynamic object initialization
 - [ ] Extended telemetry and data logging
 - [ ] Wifi connectivity for remote monitoring
-- [ ] Battery profile library expansion
+
+### Suggested Enhancement Areas:
+- MQTT Telemetry Integration - Publish measurements & state to broker
+- Dynamic Battery Profile Selection - EEPROM storage + runtime switching
+- Temperature Compensation - Sensor integration for thermal derating
+- Extended Diagnostics - Error logging, efficiency tracking, performance metrics
+- Configuration Web UI - Runtime tuning without recompilation
+- INA226 Optimization - Averaging, alert thresholds, measurement validation
 
 ## Integration Notes
 
