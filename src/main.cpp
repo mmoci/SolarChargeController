@@ -1,12 +1,33 @@
 #include "ChargeController.h"
+#include "BatteryProfileSelector.h"
 #include "SensorINA226.h"      // Concrete sensor
 #include "PwmDcConverter.h"    // Concrete PWM actuator
 #include "DPSxDcConverter.h"   // Concrete DPS actuator
 #include "DPSxMeasurements.h"
+#include "MqttClient.h"
 
 static constexpr uint8_t I2C_SCL_PIN             {22};
 static constexpr uint8_t I2C_SDA_PIN             {21};
 static constexpr uint8_t  PWM_PIN                {32};
+
+
+#ifdef MQTT_CLIENT
+MqttClient::Config mqttConfig{
+    .broker = "your_broker_address",
+    .port = 1883,
+    .clientId = "your_client_id",
+    .username = "your_username",
+    .password = "your_password",
+    .wifiSsid = "your_wifi_ssid",
+    .wifiPassword = "your_wifi_password",
+    .willTopic = "your_will_topic",
+    .willPayload = "offline",
+    .onlinePayload = "online"
+};
+MqttClient mqttClient{mqttConfig};
+#endif
+
+BatteryProfileSelector profileSelector{};
 
 #ifdef DPS_DC_CONVERTER
     DPSxDcConverter dpsDcConverter{};
@@ -25,6 +46,13 @@ void setup()
     Serial.begin(115200);
     Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
 
+    #ifdef MQTT_CLIENT
+    Serial.println("[Main] Initialising MQTT client...");
+    mqttClient.init();
+    #endif
+
+    profileSelector.init();
+
     #ifdef DPS_DC_CONVERTER
     dpsDcConverter.init();
     #else
@@ -33,11 +61,15 @@ void setup()
     pwmActuator.init();
     #endif
 
-    controller.init();
+    controller.init(profileSelector.getCurrentProfile());
 }
 
 void loop() 
 {
+    #ifdef MQTT_CLIENT
+    mqttClient.process();
+    #endif
+
     #ifdef DPS_DC_CONVERTER
     dpsDcConverter.update();
     #else
