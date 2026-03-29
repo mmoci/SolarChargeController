@@ -2,6 +2,7 @@
 #include "ChargeController.h"
 #include "MockMeasurements.h"
 #include "MockActuator.h"
+#include "Config.h"
 
 class ChargeControllerTest : public ::testing::Test
 {
@@ -13,7 +14,7 @@ protected:
     
     void SetUp() override
     {
-        controller.init();
+        controller.init(BatteryConfig::LI_ION_3S_DEFAULT);
         
         // Set reasonable initial values
         pvMeasurements.setVoltage_mV(18000);
@@ -28,7 +29,7 @@ TEST_F(ChargeControllerTest, InitializesSuccessfully)
 {
     // Should not throw during init
     EXPECT_NO_FATAL_FAILURE({
-        controller.init();
+        controller.init(BatteryConfig::LI_ION_3S_DEFAULT);
     });
 }
 

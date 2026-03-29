@@ -1,4 +1,5 @@
 #include "Arduino.h"
+#include "nvs.h"
 #include <gtest/gtest.h>
 
 // Global instances
@@ -10,6 +11,19 @@ Serial2Class Serial2 = Serial2_instance;
 
 WireClass Wire_instance;
 WireClass Wire = Wire_instance;
+
+// MockNvs in-memory stores — reset between tests via MockNvs::reset()
+namespace MockNvs
+{
+    std::unordered_map<std::string, uint8_t>  u8_store;
+    std::unordered_map<std::string, int32_t>  i32_store;
+
+    void reset()
+    {
+        u8_store.clear();
+        i32_store.clear();
+    }
+}
 
 // Global milliseconds counter for tests
 unsigned long g_millis_counter = 0;

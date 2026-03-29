@@ -73,6 +73,8 @@ public:
     int read() { return -1; }
     size_t write(const uint8_t* buf, size_t size) { return 0; }
     size_t readBytes(uint8_t* buf, size_t size) { return 0; }
+    template<typename... Args>
+    void printf(const char* /*fmt*/, Args... /*args*/) {}
 };
 
 // Mock Serial class for second hardware serial

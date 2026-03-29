@@ -52,3 +52,107 @@ TEST(UtilityTests, MeasurementsStruct)
     EXPECT_EQ(m2.voltage_mV, 1000);
     EXPECT_EQ(m2.current_mA, 500);
 }
+
+// ---------------------------------------------------------------------------
+// Timer — correctness at millis() == 0 (regression for start-sentinel bug)
+// ---------------------------------------------------------------------------
+
+TEST(UtilityTests, Timer_ActiveAtMillisZero)
+{
+    Timer timer;
+    reset_millis();  // millis() == 0
+
+    timer.trigger();
+    EXPECT_TRUE(timer.active());  // must be true even when millis() returns 0
+}
+
+TEST(UtilityTests, Timer_DurationTracking)
+{
+    Timer timer;
+    reset_millis();
+
+    timer.trigger();
+    advance_millis(250);
+    timer.update();
+
+    EXPECT_TRUE(timer.active());
+    EXPECT_EQ(timer.getDuration(), 250UL);
+}
+
+TEST(UtilityTests, Timer_DurationIsZeroBeforeTrigger)
+{
+    Timer timer;
+    advance_millis(1000);
+    timer.update();  // not triggered yet
+
+    EXPECT_FALSE(timer.active());
+    EXPECT_EQ(timer.getDuration(), 0UL);
+}
+
+TEST(UtilityTests, Timer_ResetClearsDurationAndActive)
+{
+    Timer timer;
+    reset_millis();
+    timer.trigger();
+    advance_millis(100);
+    timer.update();
+    ASSERT_TRUE(timer.active());
+
+    timer.reset();
+
+    EXPECT_FALSE(timer.active());
+    EXPECT_EQ(timer.getDuration(), 0UL);
+}
+
+// ---------------------------------------------------------------------------
+// parseIntSafe
+// ---------------------------------------------------------------------------
+
+TEST(UtilityTests, ParseIntSafe_ValidPositiveInt_ReturnsTrueAndValue)
+{
+    int out{};
+    EXPECT_TRUE(parseIntSafe("1234", out));
+    EXPECT_EQ(out, 1234);
+}
+
+TEST(UtilityTests, ParseIntSafe_ValidNegativeInt_ReturnsTrueAndValue)
+{
+    int out{};
+    EXPECT_TRUE(parseIntSafe("-500", out));
+    EXPECT_EQ(out, -500);
+}
+
+TEST(UtilityTests, ParseIntSafe_Zero_ReturnsTrueAndZero)
+{
+    int out{};
+    EXPECT_TRUE(parseIntSafe("0", out));
+    EXPECT_EQ(out, 0);
+}
+
+TEST(UtilityTests, ParseIntSafe_EmptyString_ReturnsFalse)
+{
+    int out{};
+    EXPECT_FALSE(parseIntSafe("", out));
+}
+
+TEST(UtilityTests, ParseIntSafe_NonNumericString_ReturnsFalse)
+{
+    int out{};
+    EXPECT_FALSE(parseIntSafe("abc", out));
+}
+
+TEST(UtilityTests, ParseIntSafe_PartialNumeric_ReturnsTrueForLeadingDigits)
+{
+    // strtol consumes leading digits; "123abc" → 123
+    int out{};
+    EXPECT_TRUE(parseIntSafe("123abc", out));
+    EXPECT_EQ(out, 123);
+}
+
+TEST(UtilityTests, ParseIntSafe_LeadingWhitespace_HandledByStrtol)
+{
+    // strtol skips leading whitespace
+    int out{};
+    EXPECT_TRUE(parseIntSafe("  42", out));
+    EXPECT_EQ(out, 42);
+}
