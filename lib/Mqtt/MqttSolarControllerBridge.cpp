@@ -1,25 +1,7 @@
 #include "MqttSolarControllerBridge.h"
 #include <ArduinoJson.h>
 #include <Arduino.h>
-#include <cstdlib>   // strtol
-
-// ---------------------------------------------------------------------------
-// File-scope helpers
-// ---------------------------------------------------------------------------
-
-static bool parseIntSafe(std::string_view str, int& out)
-{
-    if (str.empty()) return false;
-    // Construct null-terminated string — string_view::data() is NOT guaranteed null-terminated,
-    // and strtol requires a null-terminated C string. std::stol is not used because exceptions
-    // are disabled in the ESP32 Arduino framework (-fno-exceptions), making throws call terminate().
-    const std::string s{str};
-    char* end{};
-    long val = std::strtol(s.c_str(), &end, 10);
-    if (end == s.c_str()) return false;   // no digits consumed
-    out = static_cast<int>(val);
-    return true;
-}
+#include "Utility.h"
 
 // ---------------------------------------------------------------------------
 // Constructor

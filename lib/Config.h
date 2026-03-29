@@ -6,11 +6,19 @@ namespace SensorConfig
 {
     namespace SensorINA226
     {
-        constexpr int PV_SHUNT_mOhm = 100; //mOhm
+        // INA226 max differential input = ±81.92mV.
+        // Shunt must keep voltage drop <= 81.92mV at maximum expected current.
+        // e.g. 10mΩ -> saturation at 8.19A  |  5mΩ -> saturation at 16.38A
+        // Adjust to match the actual shunt resistor populated on the board.
+        constexpr int PV_SHUNT_mOhm      = 10; // mΩ
+        constexpr int BATTERY_SHUNT_mOhm = 10; // mΩ
     }
 
-    static constexpr uint16_t PV_SENSOR_DEVICE_ADDRESS {0x12};
-    static constexpr uint16_t BATTERY_SENSOR_DEVICE_ADDRESS {0x13};
+    // INA226 I2C addresses are set by A0/A1 pins (0x40–0x4F).
+    // A0=GND, A1=GND -> 0x40   |   A0=VS, A1=GND -> 0x41
+    // Adjust to match the hardware pin strapping on each sensor board.
+    static constexpr uint16_t PV_SENSOR_DEVICE_ADDRESS      {0x40};
+    static constexpr uint16_t BATTERY_SENSOR_DEVICE_ADDRESS {0x41};
 }
 
 namespace ChargeControllerConfig

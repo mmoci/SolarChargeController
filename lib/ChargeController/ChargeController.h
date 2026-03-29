@@ -18,6 +18,9 @@ class ChargeController
     void init(const BatteryProfile& batteryProfile);
     void update();
 
+    BatteryManager::Mode getBatteryMode() const { return m_batteryManager.getMode(); }
+    int getMpptControl() const { return m_mpptControl; }
+
     private:
     MeasurementsIf* m_pvMeasurements{};
     MeasurementsIf* m_batteryMeasurements{};

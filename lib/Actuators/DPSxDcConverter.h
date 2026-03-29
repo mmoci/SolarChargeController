@@ -8,8 +8,11 @@
 namespace DPSxDcConverterConfig
 {
     static constexpr ActuatorIf::ControlMode CONTROL_MODE {ActuatorIf::ControlMode::VOLTAGE_SETPOINT};
-    static constexpr int MAX_MPPT_VOLTAGE_CONTROL_VALUE   {60000}; // Represents max voltage = 60V
-    static constexpr int MAX_MPPT_CURRENT_CONTROL_VALUE   {5000}; // Represents max current = 5A
+    // DPS5005 Modbus registers use 0.01V per bit and 0.01A per bit.
+    // MAX values represent the register value written at 100% control output.
+    // DPS5005 hardware max: 50.00V → register 5000 | 5.00A → register 500
+    static constexpr int MAX_MPPT_VOLTAGE_CONTROL_VALUE   {5000}; // 50.00 V in 0.01V/bit units
+    static constexpr int MAX_MPPT_CURRENT_CONTROL_VALUE   {500};  //  5.00 A in 0.01A/bit units
 
     constexpr int selectControlValueFromControlMode()
     {
@@ -57,16 +60,16 @@ class DPSxDcConverter : public Device, public ActuatorIf
     private:
     enum class Register : uint16_t
     {
-        // Don't know if the values are correct
-        UOUT   = 0x0002,
-        IOUT   = 0x0003,
-        POWER  = 0x0004,
-        UIN    = 0x0005,
-        U_SET  = 0x0050,
-        I_SET  = 0x0051,
-        S_OVP  = 0x0052,
-        S_OVC  = 0x0053,
-        S_INI  = 0x0057
+        // DPS5005 Modbus RTU register map (0.01V per bit / 0.01A per bit)
+        U_SET   = 0x0000, ///< Voltage setpoint
+        I_SET   = 0x0001, ///< Current setpoint
+        UOUT    = 0x0002, ///< Output voltage (read)
+        IOUT    = 0x0003, ///< Output current (read)
+        POWER   = 0x0004, ///< Output power   (read, 0.01W/bit)
+        UIN     = 0x0005, ///< Input voltage   (read)
+        LOCK    = 0x0006, ///< Key-lock: 0=off 1=on
+        PROTECT = 0x0007, ///< Protection flags (OVP/OCP/OPP/OTP)
+        ON_OFF  = 0x0008  ///< Output enable: 1=on 0=off
     };
 
     enum class Function : uint8_t
@@ -90,7 +93,8 @@ class DPSxDcConverter : public Device, public ActuatorIf
     };
 
     // ===== Configuration =====
-    static constexpr uint8_t  SLAVE_ADDRESS {0xFF};
+    // DPS5005 factory default Modbus slave address = 1 (configurable on the device menu).
+    static constexpr uint8_t  SLAVE_ADDRESS {0x01};
     static constexpr uint16_t CRC16_DEFAULT_VALUE {0xFFFF};
     static constexpr uint16_t CRC16_POLYNOMIAL_VALUE {0xA001};
     static constexpr uint16_t FRAME_SIZE {8}; // bytes

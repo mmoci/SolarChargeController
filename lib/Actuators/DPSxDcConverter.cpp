@@ -119,9 +119,10 @@ void DPSxDcConverter::handleModbusMessages()
                 std::vector<uint16_t> buffer{receiveRegisterReadRsp(nrOfRegisters)};
                 if(!buffer.empty())
                 {
-                    m_outVoltage_mV = buffer[0] * 1000;
-                    m_outCurrent_mA = buffer[1] * 1000;
-                    m_inVoltage_mV  = buffer[3] * 1000;
+                    // DPS registers are in 0.01V / 0.01A per bit → multiply by 10 to get mV / mA
+                    m_outVoltage_mV = buffer[0] * 10;
+                    m_outCurrent_mA = buffer[1] * 10;
+                    m_inVoltage_mV  = buffer[3] * 10;
 
                     m_consecutiveErrors = 0; // Reset error count on successful read
                     m_lastUpdateTime = millis(); // Update last successful read time

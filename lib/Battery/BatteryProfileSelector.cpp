@@ -45,16 +45,22 @@ void BatteryProfileSelector::init()
 BatteryProfileSelector::Result BatteryProfileSelector::setProfileType(BatteryConfig::BatteryType type)
 {
     const BatteryProfile& profile = BatteryConfig::getDefaultBatteryProfile(type);
+
+    // Set m_currentType before validateProfile so the margin check compares the
+    // new type's voltages against its own defaults, not the previous type's limits.
+    // This allows switching between types whose voltage ranges differ significantly.
+    const auto previousType = m_currentType;
+    m_currentType = type;
+
     Result validationResult = validateProfile(profile);
     if(validationResult != Result::SUCCESS)
     {
+        m_currentType = previousType; // restore on validation failure
         Serial.println("[BatteryProfileSelector] ERROR: Invalid profile parameters!");
         return validationResult;
     }
 
-    m_currentType = type;
     m_currentProfile = profile;
-
     return saveProfileToNVS();
 }
 
@@ -157,7 +163,9 @@ BatteryProfileSelector::Result BatteryProfileSelector::validateProfile(const Bat
     if(profile.prechargeVoltage_mV >= profile.rechargeVoltage_mV)
         return Result::VALIDATION_ERROR;
 
-    if(profile.loadDisconnectVoltage_mV >= profile.prechargeVoltage_mV)
+    // loadDisconnect may equal precharge (both thresholds at the same level is valid
+    // for a solar charger — it disconnects load and enters precharge simultaneously).
+    if(profile.loadDisconnectVoltage_mV > profile.prechargeVoltage_mV)
         return Result::VALIDATION_ERROR;
 
     if (profile.maxChargingCurrent_mA <= 0 || profile.maxChargingCurrent_mA > MAX_CHARGING_CURRENT)

@@ -129,10 +129,7 @@ void MqttClient::setupWifi()
 void MqttClient::subscribeAll()
 {
     for (const auto& [topic, callback] : m_subscriptions)
-    {
         m_mqttClient.subscribe(topic.c_str());
-        Serial.printf("[MqttClient] Subscribed: %s\n", topic.c_str());
-    }
 }
 
 void MqttClient::dispatchMessage(char* topic, byte* payload, unsigned int length)

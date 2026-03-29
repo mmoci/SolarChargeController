@@ -118,12 +118,8 @@ private:
     void registerCommands();
 
     // Command handlers — called when HA publishes to a command topic
+    // Integer-valued commands use handleIntCommand() directly; only battery type needs a dedicated handler.
     void onBatteryTypeSet(std::string_view payload);
-    void onMaxVoltageSet(std::string_view payload);
-    void onRechargeVoltageSet(std::string_view payload);
-    void onPrechargeVoltageSet(std::string_view payload);
-    void onLoadDisconnectVoltageSet(std::string_view payload);
-    void onMaxChargingCurrentSet(std::string_view payload);
 
     // Shared logic: saves profile to NVS, publishes updated state, then restarts ESP
     void saveAndRestart();
