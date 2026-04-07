@@ -82,25 +82,33 @@ TEST_F(MpptControllerTest, ControlLimits)
     EXPECT_LE(mpptController.getRequestedOutput(), MpptController::MAX_CONTROL_VALUE);
 }
 
-// Test control step increment
-TEST_F(MpptControllerTest, CustomOutputStep)
+// Variable-step: step is clamped within [MIN_STEP, MAX_STEP] on every update
+TEST_F(MpptControllerTest, VariableStep_AlwaysWithinBounds)
 {
-    int customStep = 5;
-    mpptController.setOutputStep(customStep);
-    
-    EXPECT_EQ(mpptController.getOutputStep(), customStep);
-    
-    // Verify step size is applied
-    Measurements m1{10000, 1000};
+    // Large dP/dV → step saturates at MAX_STEP
+    Measurements m1{10000, 1000};   // 10W
     mpptController.update(m1);
-    int control1 = mpptController.getRequestedOutput();
-    
-    Measurements m2{11000, 2000};  // Higher power
+
+    Measurements m2{11000, 5000};   // 55W — large power jump, large |dP/dV|
     mpptController.update(m2);
-    int control2 = mpptController.getRequestedOutput();
-    
-    // Control increment should be <= customStep
-    EXPECT_LE(control2 - control1, customStep);
+
+    EXPECT_GE(mpptController.getOutputStep(), MpptController::MIN_STEP);
+    EXPECT_LE(mpptController.getOutputStep(), MpptController::MAX_STEP);
+}
+
+// Variable-step: small dP/dV (near MPP) yields MIN_STEP
+TEST_F(MpptControllerTest, VariableStep_SmallGradient_YieldsMinStep)
+{
+    // Establish a baseline at 20W
+    Measurements m1{10000, 2000};
+    mpptController.update(m1);
+
+    // Simulate near-MPP: voltage increases 200mV but power barely changes (-8mW).
+    // |dP/dV| = 8 / 200 = 0.04 → K_STEP × 0.04 = 0.1 → int(0.1) = 0 → constrained to MIN_STEP
+    Measurements m2{10200, 1960};   // power = 19992mW vs 20000mW baseline
+    mpptController.update(m2);
+
+    EXPECT_EQ(mpptController.getOutputStep(), MpptController::MIN_STEP);
 }
 
 // Test tracking power changes

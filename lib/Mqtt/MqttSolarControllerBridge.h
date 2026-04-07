@@ -40,6 +40,7 @@ public:
     std::string batteryCurrent()            const { return m_base + "/telemetry/battery_current"; }
     std::string chargingMode()              const { return m_base + "/telemetry/charging_mode"; }
     std::string controlSignalPct()          const { return m_base + "/telemetry/control_signal_pct"; }
+    std::string efficiencyPct()             const { return m_base + "/telemetry/efficiency_pct"; }
 
     // Profile state topics (published by controller, retain=true)
     std::string batteryTypeState()           const { return m_base + "/profile/battery_type/state"; }
@@ -121,9 +122,6 @@ private:
     // Integer-valued commands use handleIntCommand() directly; only battery type needs a dedicated handler.
     void onBatteryTypeSet(std::string_view payload);
 
-    // Shared logic: saves profile to NVS, publishes updated state, then restarts ESP
-    void saveAndRestart();
-
     // Helper: handles boilerplate for integer-valued commands
     void handleIntCommand(std::string_view name, std::string_view payload, std::function<BatteryProfileSelector::Result(int)> setter);
 
@@ -134,7 +132,4 @@ private:
     MqttClient&                     m_mqttClient;
     BatteryProfileSelector&         m_profileSelector;
     MqttSolarControllerTopicBuilder m_topics;
-
-    /// Delay before ESP restart to allow the MQTT publish to reach the broker.
-    static constexpr unsigned long RESTART_DELAY_MS{2000};
 };

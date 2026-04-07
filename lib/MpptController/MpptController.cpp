@@ -9,14 +9,24 @@ void MpptController::init()
 
 void MpptController::update(Measurements pvMeasurements)
 {
-    auto [voltage_mV, current_mA] = pvMeasurements;
-    auto [m_voltage_mV, m_current_mA] = m_pvMeasurements;
+    long power_mW {pvMeasurements.voltage_mV * pvMeasurements.current_mA / 1000}; // Convert to mW to avoid overflow and match typical PV power units
+    long m_power_mW {m_pvMeasurements.voltage_mV * m_pvMeasurements.current_mA / 1000}; // Previous power in mW
 
-    long power_mW {voltage_mV * current_mA}; 
-    long m_power_mW {m_voltage_mV * m_current_mA};
+    long deltaPower_mW = power_mW - m_power_mW;
+    long deltaVoltage_mV = pvMeasurements.voltage_mV - m_pvMeasurements.voltage_mV;
 
-    if(power_mW < m_power_mW)
-        m_direction = (m_direction == Direction::Up) ? Direction::Down : Direction::Up; 
+    if(std::abs(deltaVoltage_mV) >= MIN_DELTA_VOLTAGE_mV)
+    {
+        // Scale step proportionally to |dP/dV|, clamped to [MIN_STEP, MAX_STEP]
+       m_step = constrain(static_cast<int>(K_STEP * std::abs(static_cast<float>(deltaPower_mW) / static_cast<float>(deltaVoltage_mV))), MIN_STEP, MAX_STEP
+        );
+
+        // Debug output to observe dynamic step sizing behavior
+        Serial.printf("[MPPT] |dP/dV|=%.3f A, step=%d\n", std::abs(static_cast<float>(deltaPower_mW) / static_cast<float>(deltaVoltage_mV)), m_step);
+        
+        if(deltaPower_mW < 0)
+            m_direction = (m_direction == Direction::Up) ? Direction::Down : Direction::Up; 
+    }
 
     if(m_direction == Direction::Up)
         m_outputData.control += m_step;

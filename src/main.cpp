@@ -6,6 +6,7 @@
 #include "DPSxMeasurements.h"
 #include "MqttClient.h"
 #include "MqttSolarControllerBridge.h"
+#include "OtaHandler.h"
 #include "Utility.h"
 
 static constexpr uint8_t I2C_SCL_PIN             {22};
@@ -48,12 +49,18 @@ MqttSolarControllerBridge bridge{mqttClient, profileSelector, DEVICE_ID};
     DPSxDcConverter dpsDcConverter{};
     DPSxMeasurements pvMeasurements{&dpsDcConverter, DPSxMeasurements::MeasurementSource::Input};
     DPSxMeasurements batteryMeasurements{&dpsDcConverter, DPSxMeasurements::MeasurementSource::Output};
-    ChargeController controller{&pvMeasurements, &batteryMeasurements, &dpsDcConverter};
+    ChargeController controller{&pvMeasurements, &batteryMeasurements, &dpsDcConverter, &profileSelector};
+    #ifdef MQTT_CLIENT
+    OtaHandler otaHandler{{.hostname = DEVICE_ID, .password = "ota_password"}, &dpsDcConverter};
+    #endif
 #else
     SensorINA226 pvSensor{SensorConfig::PV_SENSOR_DEVICE_ADDRESS, SensorConfig::SensorINA226::PV_SHUNT_mOhm};
     SensorINA226 batterySensor{SensorConfig::BATTERY_SENSOR_DEVICE_ADDRESS, SensorConfig::SensorINA226::BATTERY_SHUNT_mOhm};
     PwmDcConverter pwmActuator{PWM_PIN};
-    ChargeController controller{&pvSensor, &batterySensor, &pwmActuator};
+    ChargeController controller{&pvSensor, &batterySensor, &pwmActuator, &profileSelector};
+    #ifdef MQTT_CLIENT
+    OtaHandler otaHandler{{.hostname = DEVICE_ID, .password = "ota_password"}, &pwmActuator};
+    #endif
 #endif
 
 void setup() 
@@ -65,8 +72,6 @@ void setup()
     Serial.println("[Main] Initialising MQTT client...");
     mqttClient.init();
     #endif
-
-    profileSelector.init();
 
     #ifdef MQTT_CLIENT
     bridge.init();
@@ -81,13 +86,18 @@ void setup()
     pwmActuator.init();
     #endif
 
-    controller.init(profileSelector.getCurrentProfile());
+    controller.init();
+
+    #ifdef MQTT_CLIENT
+    otaHandler.init();
+    #endif
 }
 
 void loop() 
 {
     #ifdef MQTT_CLIENT
     mqttClient.process();
+    otaHandler.handle();
     #endif
 
     // Update sensors and controller first so telemetry always reads fresh values

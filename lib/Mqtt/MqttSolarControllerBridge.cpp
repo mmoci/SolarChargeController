@@ -1,6 +1,8 @@
 #include "MqttSolarControllerBridge.h"
 #include <ArduinoJson.h>
 #include <Arduino.h>
+#include <sstream>
+#include <iomanip>
 #include "Utility.h"
 
 // ---------------------------------------------------------------------------
@@ -34,17 +36,20 @@ void MqttSolarControllerBridge::init()
 void MqttSolarControllerBridge::publishTelemetry(const MeasurementsIf& pvMeas, const MeasurementsIf& battMeas, BatteryManager::Mode  mode, int mpptControl_pct)
 {
     int pvPower_mW = (pvMeas.getVoltage_mV() * pvMeas.getCurrent_mA()) / 1000;
+    int battPower_mW = (battMeas.getVoltage_mV() * battMeas.getCurrent_mA()) / 1000;
+    int efficiency_pct = (pvPower_mW > 0) ? (battPower_mW * 100) / pvPower_mW : 0;
 
     // High-frequency sensor readings — no retain, fresh value supersedes stale
-    m_mqttClient.publish(m_topics.pvVoltage(),      std::to_string(pvMeas.getVoltage_mV()));
-    m_mqttClient.publish(m_topics.pvCurrent(),      std::to_string(pvMeas.getCurrent_mA()));
-    m_mqttClient.publish(m_topics.pvPower(),        std::to_string(pvPower_mW));
-    m_mqttClient.publish(m_topics.batteryVoltage(), std::to_string(battMeas.getVoltage_mV()));
-    m_mqttClient.publish(m_topics.batteryCurrent(), std::to_string(battMeas.getCurrent_mA()));
+    m_mqttClient.publish(m_topics.pvVoltage(), floatToString(pvMeas.getVoltage_mV() / 1000.0, 3));        // Convert mV to V for more human-friendly telemetry
+    m_mqttClient.publish(m_topics.pvCurrent(), floatToString(pvMeas.getCurrent_mA() / 1000.0, 3));        // Convert mA to A for more human-friendly telemetry
+    m_mqttClient.publish(m_topics.pvPower(), floatToString(pvPower_mW / 1000.0, 3));                      // Convert mW to W for more human-friendly telemetry
+    m_mqttClient.publish(m_topics.batteryVoltage(), floatToString(battMeas.getVoltage_mV() / 1000.0, 3)); // Convert mV to V for more human-friendly telemetry
+    m_mqttClient.publish(m_topics.batteryCurrent(), floatToString(battMeas.getCurrent_mA() / 1000.0, 3)); // Convert mA to A for more human-friendly telemetry
 
     // State topics — retain so HA shows last known value after reconnect
-    m_mqttClient.publish(m_topics.chargingMode(),     batteryModeToString(mode), /*retain=*/true);
+    m_mqttClient.publish(m_topics.chargingMode(), batteryModeToString(mode), /*retain=*/true);
     m_mqttClient.publish(m_topics.controlSignalPct(), std::to_string(mpptControl_pct), /*retain=*/true);
+    m_mqttClient.publish(m_topics.efficiencyPct(), std::to_string(efficiency_pct), /*retain=*/true);
 }
 
 // ---------------------------------------------------------------------------
@@ -60,27 +65,27 @@ void MqttSolarControllerBridge::registerCommands()
 
     m_mqttClient.subscribe(m_topics.maxVoltageSet(), [this](std::string_view payload)
     {
-        handleIntCommand("max_voltage", payload, [this](int v) { return m_profileSelector.setMaxVoltage(v); });
+        handleIntCommand("max_voltage", payload, [this](int value) { return m_profileSelector.setMaxVoltage(value); });
     });
 
     m_mqttClient.subscribe(m_topics.rechargeVoltageSet(), [this](std::string_view payload)
     {
-        handleIntCommand("recharge_voltage", payload, [this](int v) { return m_profileSelector.setRechargeVoltage(v); });
+        handleIntCommand("recharge_voltage", payload, [this](int value) { return m_profileSelector.setRechargeVoltage(value); });
     });
 
     m_mqttClient.subscribe(m_topics.prechargeVoltageSet(), [this](std::string_view payload)
     {
-        handleIntCommand("precharge_voltage", payload, [this](int v) { return m_profileSelector.setPrechargeVoltage(v); });
+        handleIntCommand("precharge_voltage", payload, [this](int value) { return m_profileSelector.setPrechargeVoltage(value); });
     });
 
     m_mqttClient.subscribe(m_topics.loadDisconnectVoltageSet(), [this](std::string_view payload)
     {
-        handleIntCommand("load_disconnect_voltage", payload, [this](int v) { return m_profileSelector.setLoadDisconnectVoltage(v); });
+        handleIntCommand("load_disconnect_voltage", payload, [this](int value) { return m_profileSelector.setLoadDisconnectVoltage(value); });
     });
 
     m_mqttClient.subscribe(m_topics.maxChargingCurrentSet(), [this](std::string_view payload)
     {
-        handleIntCommand("max_charging_current", payload, [this](int v) { return m_profileSelector.setMaxChargingCurrent(v); });
+        handleIntCommand("max_charging_current", payload, [this](int value) { return m_profileSelector.setMaxChargingCurrent(value); });
     });
 }
 
@@ -105,10 +110,10 @@ void MqttSolarControllerBridge::onBatteryTypeSet(std::string_view payload)
         return;
     }
 
-    saveAndRestart();
+    publishProfileState();
 }
 
-void MqttSolarControllerBridge::handleIntCommand(std::string_view name, std::string_view payload, std::function<BatteryProfileSelector::Result(int)> setter)
+void MqttSolarControllerBridge::handleIntCommand(std::string_view name, std::string_view payload, std::function<BatteryProfileSelector::Result(int)> setterFn)
 {
     int value{};
     if (!parseIntSafe(payload, value))
@@ -118,7 +123,7 @@ void MqttSolarControllerBridge::handleIntCommand(std::string_view name, std::str
     }
 
     // Attempt to set the new value; if validation fails, log and reject without restarting.
-    auto result = setter(value);
+    auto result = setterFn(value);
 
     if (result != BatteryProfileSelector::Result::SUCCESS)
     {
@@ -126,24 +131,10 @@ void MqttSolarControllerBridge::handleIntCommand(std::string_view name, std::str
         return;
     }
 
-    saveAndRestart();
-}
-
-void MqttSolarControllerBridge::saveAndRestart()
-{
-    auto result = m_profileSelector.saveProfileToNVS();
-    if (result != BatteryProfileSelector::Result::SUCCESS)
-    {
-        Serial.printf("[Bridge] saveProfileToNVS failed (err=%d) — restart aborted\n",static_cast<int>(result));
-        return;
-    }
-
     publishProfileState();
-
-    Serial.printf("[Bridge] Profile saved. Restarting in %lums...\n", RESTART_DELAY_MS);
-    delay(RESTART_DELAY_MS);
-    ESP.restart();
 }
+
+
 
 // ---------------------------------------------------------------------------
 // Private — profile state publish
@@ -198,13 +189,14 @@ void MqttSolarControllerBridge::publishDiscovery()
     };
 
     const SensorEntry sensors[] = {
-        { "pv_voltage",         "PV Voltage",       m_topics.pvVoltage(),        "mV", "voltage", false },
-        { "pv_current",         "PV Current",       m_topics.pvCurrent(),        "mA", "current", false },
-        { "pv_power",           "PV Power",         m_topics.pvPower(),          "mW", "power",   false },
-        { "battery_voltage",    "Battery Voltage",  m_topics.batteryVoltage(),   "mV", "voltage", false },
-        { "battery_current",    "Battery Current",  m_topics.batteryCurrent(),   "mA", "current", false },
-        { "charging_mode",      "Charging Mode",    m_topics.chargingMode(),     nullptr, nullptr, true  },
-        { "control_signal_pct", "Control Signal",   m_topics.controlSignalPct(), "%",  nullptr,   true  },
+        { "pv_voltage",         "PV Voltage",          m_topics.pvVoltage(),        "V", "voltage", false },
+        { "pv_current",         "PV Current",          m_topics.pvCurrent(),        "A", "current", false },
+        { "pv_power",           "PV Power",            m_topics.pvPower(),          "W", "power",   false },
+        { "battery_voltage",    "Battery Voltage",     m_topics.batteryVoltage(),   "V", "voltage", false },
+        { "battery_current",    "Battery Current",     m_topics.batteryCurrent(),   "A", "current", false },
+        { "charging_mode",      "Charging Mode",       m_topics.chargingMode(),     nullptr, nullptr, true },
+        { "control_signal_pct", "Control Signal",      m_topics.controlSignalPct(), "%",  nullptr,   true  },
+        { "efficiency_pct",     "Charging Efficiency", m_topics.efficiencyPct(),    "%",  nullptr,   true },
     };
 
     for (const auto& s : sensors)

@@ -66,4 +66,6 @@ void SensorINA226::update()
     }
     int16_t rawCurrent{static_cast<int16_t>(buffer[0] << 8 | buffer[1])};
     m_current_mA = rawCurrent * CURRENT_LSB_mA;
+
+    m_lastUpdateTime = millis(); // stamp only when both registers read successfully
 }

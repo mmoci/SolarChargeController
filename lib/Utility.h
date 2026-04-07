@@ -1,6 +1,8 @@
 #pragma once
 
 #include <Arduino.h>
+#include <sstream>
+#include <iomanip>
 
 /** Simple timer utility class */
 class Timer
@@ -58,4 +60,11 @@ inline bool parseIntSafe(std::string_view str, int& out)
     if (end == s.c_str()) return false;   // no digits consumed
     out = static_cast<int>(val);
     return true;
+}
+
+inline std::string floatToString(float value, int precision = 2)
+{
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(precision) << value;
+    return oss.str();
 }

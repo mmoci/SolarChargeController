@@ -34,6 +34,24 @@ class SensorINA226 : public Device, public SensorI2C, public MeasurementsIf
      */
     int getVoltage_mV() const override {return m_voltage_mV;}
 
+    /**
+     * @brief Returns false if the device is not connected or if no successful
+     *        I2C read has completed within STALE_TIMEOUT_MS.
+     */
+    bool isMeasurementValid() const override
+    {
+        if (!m_isConnected) return false;
+        return (millis() - m_lastUpdateTime) < STALE_TIMEOUT_MS;
+    }
+
+    /**
+     * @brief Returns milliseconds elapsed since the last successful I2C read.
+     */
+    unsigned long lastTimeUpdated() const override
+    {
+        return millis() - m_lastUpdateTime;
+    }
+
     private:
     /**
      * @brief Represents current value per 1bit. 
@@ -75,6 +93,12 @@ class SensorINA226 : public Device, public SensorI2C, public MeasurementsIf
     int m_voltage_mV{};
     int m_current_mA{};
     int m_shunt_mOhm{};
+    unsigned long m_lastUpdateTime{};
+
+    // If no successful read arrives within this window the measurement is
+    // considered stale. INA226 reads every ~6ms so 100ms gives ~16x headroom
+    // for transient I2C hiccups before the controller reacts.
+    static constexpr unsigned long STALE_TIMEOUT_MS{100};
 
     void configureCalibration();
     void setConfiguration();

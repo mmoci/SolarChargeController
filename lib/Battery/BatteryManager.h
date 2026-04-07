@@ -37,6 +37,13 @@ class BatteryManager
     void update(const Measurements& batteryMeasurements, bool chargingAvailable);
 
     /**
+     * @brief Updates battery profile with new profile and applies it immediately.
+     * 
+     * @param profile New battery profile to apply
+     */
+    void updateBatteryProfile(const BatteryProfile& profile);
+
+    /**
      * @brief When CV mode is active returns true as voltage limit is active.
      * 
      * @return true When mode is set to CV, false otherwise

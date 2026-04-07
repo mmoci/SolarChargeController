@@ -309,3 +309,56 @@ TEST(BatteryProfileSelectorIntegration, NvsRoundTrip_TypeChangePersisted)
                   BatteryConfig::LI_ION_4S_DEFAULT.maxVoltage_mV);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Observer (registerProfileObserver)
+// ---------------------------------------------------------------------------
+
+TEST_F(BatteryProfileSelectorTest, Observer_FiredOnSetProfileType)
+{
+    int callCount = 0;
+    BatteryProfile receivedProfile{};
+
+    selector.registerProfileObserver([&](const BatteryProfile& p) {
+        ++callCount;
+        receivedProfile = p;
+    });
+
+    selector.setProfileType(BatteryConfig::BatteryType::LIION_4S);
+
+    EXPECT_EQ(callCount, 1);
+    EXPECT_EQ(receivedProfile.maxVoltage_mV, BatteryConfig::LI_ION_4S_DEFAULT.maxVoltage_mV);
+}
+
+TEST_F(BatteryProfileSelectorTest, Observer_FiredOnSetMaxVoltage)
+{
+    int callCount = 0;
+    selector.registerProfileObserver([&](const BatteryProfile&) { ++callCount; });
+
+    selector.setMaxVoltage(12500);
+
+    EXPECT_EQ(callCount, 1);
+}
+
+TEST_F(BatteryProfileSelectorTest, Observer_NotFiredOnValidationFailure)
+{
+    int callCount = 0;
+    selector.registerProfileObserver([&](const BatteryProfile&) { ++callCount; });
+
+    // 14000 exceeds the upper margin — validation fails, observer must NOT fire
+    selector.setMaxVoltage(14000);
+
+    EXPECT_EQ(callCount, 0);
+}
+
+TEST_F(BatteryProfileSelectorTest, Observer_ReceivesUpdatedProfile)
+{
+    BatteryProfile captured{};
+    selector.registerProfileObserver([&](const BatteryProfile& p) { captured = p; });
+
+    selector.setMaxChargingCurrent(5000);
+
+    EXPECT_EQ(captured.maxChargingCurrent_mA, 5000);
+    // Other fields unchanged from defaults
+    EXPECT_EQ(captured.maxVoltage_mV, BatteryConfig::LI_ION_3S_DEFAULT.maxVoltage_mV);
+}

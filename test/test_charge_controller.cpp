@@ -14,7 +14,7 @@ protected:
     
     void SetUp() override
     {
-        controller.init(BatteryConfig::LI_ION_3S_DEFAULT);
+        controller.init();
         
         // Set reasonable initial values
         pvMeasurements.setVoltage_mV(18000);
@@ -29,7 +29,7 @@ TEST_F(ChargeControllerTest, InitializesSuccessfully)
 {
     // Should not throw during init
     EXPECT_NO_FATAL_FAILURE({
-        controller.init(BatteryConfig::LI_ION_3S_DEFAULT);
+        controller.init();
     });
 }
 

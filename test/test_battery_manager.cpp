@@ -152,3 +152,38 @@ TEST_F(BatteryManagerTest, StateTransitionSequence)
     batteryManager.update(measurements, true);
     EXPECT_EQ(batteryManager.getMode(), BatteryManager::Mode::CV);
 }
+
+// Test updateBatteryProfile applies new limits immediately
+TEST_F(BatteryManagerTest, UpdateBatteryProfile_AppliesNewLimitsImmediately)
+{
+    // Move to CC mode with the default 3S profile (max 12600mV)
+    Measurements measurements{11000, 1000};
+    batteryManager.update(measurements, true);
+    EXPECT_EQ(batteryManager.getMode(), BatteryManager::Mode::CC);
+
+    // Swap to 4S profile whose maxVoltage is higher (16800mV)
+    batteryManager.updateBatteryProfile(BatteryConfig::LI_ION_4S_DEFAULT);
+
+    // Voltage 12600 is now well below 4S max → must stay in CC, not transition to CV
+    measurements.voltage_mV = 12600;
+    batteryManager.update(measurements, true);
+    EXPECT_EQ(batteryManager.getMode(), BatteryManager::Mode::CC);
+
+    // Verify new voltage limit is in effect
+    EXPECT_EQ(batteryManager.getMaxVoltageLimit(), std::nullopt);  // not in CV mode
+}
+
+// Test updateBatteryProfile mid-charge does not reset state machine
+TEST_F(BatteryManagerTest, UpdateBatteryProfile_PreservesCurrentMode)
+{
+    // Reach CV mode under 3S profile
+    Measurements measurements{11000, 1000};
+    batteryManager.update(measurements, true);
+    measurements.voltage_mV = 12600;
+    batteryManager.update(measurements, true);
+    EXPECT_EQ(batteryManager.getMode(), BatteryManager::Mode::CV);
+
+    // Hot-swap profile — mode must not reset to Idle
+    batteryManager.updateBatteryProfile(BatteryConfig::LI_ION_3S_DEFAULT);
+    EXPECT_EQ(batteryManager.getMode(), BatteryManager::Mode::CV);
+}

@@ -56,7 +56,10 @@ class MqttClient
     explicit MqttClient(const Config& config);
 
     /**
-     * @brief Initialises WiFi (blocking until connected) and configures MQTT broker.
+     * @brief Starts WiFi connection (best-effort, up to WIFI_CONNECT_TIMEOUT_MS) and
+     *        configures the MQTT broker endpoint.
+     *        If WiFi is unavailable the device continues in standalone charging mode;
+     *        process() retries WiFi and MQTT in the background.
      *        Call once from setup().
      */
     void init();
@@ -97,7 +100,7 @@ class MqttClient
 
     private:
     bool connect();
-    void setupWifi();
+    bool setupWifi();   ///< Attempts WiFi connection with timeout; returns true if connected
     void subscribeAll();
     void dispatchMessage(char* topic, byte* payload, unsigned int length);
 
@@ -108,5 +111,7 @@ class MqttClient
     std::vector<ConnectCallback>                      m_connectCallbacks{};
     std::unordered_map<std::string, MessageCallback>  m_subscriptions{};
 
-    static constexpr unsigned long RECONNECT_INTERVAL_MS{5000};
+    static constexpr unsigned long WIFI_CONNECT_TIMEOUT_MS  {30000}; ///< Max wait in init()
+    static constexpr unsigned long WIFI_RECONNECT_INTERVAL_MS{30000}; ///< Retry interval in process()
+    static constexpr unsigned long RECONNECT_INTERVAL_MS    { 5000}; ///< MQTT retry interval
 };

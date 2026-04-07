@@ -283,7 +283,15 @@ BatteryProfileSelector::Result BatteryProfileSelector::saveProfileToNVS()
 
     nvs_commit(m_nvsHandle);
 
+    if(m_profileObserverCb) 
+        m_profileObserverCb(m_currentProfile);
+
     return Result::SUCCESS;
+}
+
+void BatteryProfileSelector::registerProfileObserver(BatteryProfileObserver profileObserver)
+{
+    m_profileObserverCb = profileObserver;
 }
 
 void BatteryProfileSelector::printCurrentProfile() const

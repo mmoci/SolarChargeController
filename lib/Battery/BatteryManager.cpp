@@ -39,6 +39,11 @@ void BatteryManager::update(const Measurements& batteryMeasurements, bool chargi
     }    
 }
 
+void BatteryManager::updateBatteryProfile(const BatteryProfile& profile)
+{
+    m_profile = profile;
+}
+
 // Mode state handlers
 
 void BatteryManager::handleIdleMode(const Measurements& batteryMeasurements, bool chargingAvailable)

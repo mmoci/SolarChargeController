@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include "BatteryProfile.h"
 #include "Config.h"
 #include "nvs.h"
@@ -9,6 +10,8 @@
 class BatteryProfileSelector
 {
     public:
+
+    using BatteryProfileObserver = std::function<void(const BatteryProfile&)>;
 
     // Result type for profile operations
     enum class Result
@@ -40,6 +43,9 @@ class BatteryProfileSelector
     const BatteryConfig::BatteryType getCurrentType() const {return m_currentType;}
     const BatteryProfile& getCurrentProfile() const {return m_currentProfile;}
 
+    // Observer pattern for profile changes — called after successful setProfileType() and after loading from NVS in init()
+    void registerProfileObserver(BatteryProfileObserver profileObserver);
+
     // Profile management
     Result saveProfileToNVS();
     Result loadProfileFromNVS();
@@ -64,6 +70,7 @@ class BatteryProfileSelector
     BatteryProfile m_currentProfile{};
     BatteryConfig::BatteryType m_currentType{};
     nvs_handle_t m_nvsHandle{};
+    BatteryProfileObserver m_profileObserverCb{};
 
     static constexpr float VOLTAGE_OVERRIDE_UPPER_MARGIN = 1.1f;  // +10% max
     static constexpr float VOLTAGE_OVERRIDE_LOWER_MARGIN = 0.9f;  // -10% min

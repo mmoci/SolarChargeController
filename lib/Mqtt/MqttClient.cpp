@@ -16,8 +16,23 @@ void MqttClient::init()
 
 void MqttClient::process()
 {
+    static unsigned long lastWifiAttempt{0};
     static unsigned long lastReconnectAttempt{0};
 
+    // Step 1: ensure WiFi is up — without it MQTT cannot connect.
+    if (WiFi.status() != WL_CONNECTED)
+    {
+        const unsigned long now{millis()};
+        if (now - lastWifiAttempt >= WIFI_RECONNECT_INTERVAL_MS)
+        {
+            lastWifiAttempt = now;
+            Serial.println("[MqttClient] WiFi disconnected — attempting reconnect...");
+            WiFi.reconnect();
+        }
+        return; // Charging continues unaffected; MQTT waits for WiFi
+    }
+
+    // Step 2: ensure MQTT broker connection is up.
     if (!m_mqttClient.connected())
     {
         const unsigned long now{millis()};
@@ -27,11 +42,11 @@ void MqttClient::process()
             if (connect())
                 lastReconnectAttempt = 0;
         }
+        return;
     }
-    else
-    {
-        m_mqttClient.loop();
-    }
+
+    // Step 3: service incoming messages.
+    m_mqttClient.loop();
 }
 
 void MqttClient::publish(std::string_view topic, std::string_view payload, bool retain)
@@ -110,20 +125,29 @@ bool MqttClient::connect()
     return true;
 }
 
-void MqttClient::setupWifi()
+bool MqttClient::setupWifi()
 {
     Serial.printf("[MqttClient] Connecting to WiFi: %s\n", m_config.wifiSsid.data());
 
     WiFi.mode(WIFI_STA);
     WiFi.begin(m_config.wifiSsid.data(), m_config.wifiPassword.data());
 
-    while (WiFi.status() != WL_CONNECTED)
+    const unsigned long deadline{millis() + WIFI_CONNECT_TIMEOUT_MS};
+    while (WiFi.status() != WL_CONNECTED && millis() < deadline)
     {
         delay(500);
         Serial.print(".");
     }
 
+    if (WiFi.status() != WL_CONNECTED)
+    {
+        Serial.printf("\n[MqttClient] WiFi unavailable after %lums — continuing in standalone mode.\n",
+                      WIFI_CONNECT_TIMEOUT_MS);
+        return false;
+    }
+
     Serial.printf("\n[MqttClient] WiFi connected. IP: %s\n", WiFi.localIP().toString().c_str());
+    return true;
 }
 
 void MqttClient::subscribeAll()

@@ -211,11 +211,19 @@ Mock implementations provided for testing without hardware.
 ✓ Corrected INA226 I2C addresses and shunt resistor configuration
 
 ### Planned Improvements
-- [ ] CRC lookup table optimization for DPS Modbus CRC16 computation
-- [ ] Temperature compensation — sensor integration for thermal derating
-- [ ] Extended diagnostics — efficiency tracking, error logging, performance metrics
-- [ ] Configuration web UI — runtime tuning without recompilation
-- [ ] INA226 averaging and alert threshold configuration
+- [   ] CRC lookup table optimization for DPS Modbus CRC16 computation
+- [   ] Temperature compensation — sensor integration for thermal derating
+- [   ] Extended diagnostics — efficiency tracking, error logging, performance metrics
+- [   ] Configuration web UI — runtime tuning without recompilation
+- [   ] INA226 averaging and alert threshold configuration
+- [ x ] WiFi timeout + standalone fallback	Safety — device must charge without WiFi
+- [ x ] Gate MPPT on fresh measurements (DPS)	Correctness — MPPT currently over-samples
+- [ x ] Variable-step P&O	Efficiency — eliminates steady-state MPP oscillation
+- [ x ] UX: don't restart on every field change → solved by hot-reload
+- [   ] Load disconnect GPIO Hardware completeness
+- [ x ] Float telemetry (V/A/W)	HA display quality
+- [ x ] OTA firmware update	Essential for any field-deployed WiFi device
+- [ x ] Efficiency calculation (η = P_out/P_in)	Useful telemetry for system monitoring
 
 ## Integration Notes
 
