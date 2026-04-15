@@ -113,6 +113,11 @@ class DPSxDcConverter : public Device, public ActuatorIf
     ModbusState m_messageState{};
     ModbusMessageType m_activeMessageType{};
     bool m_writeMessagePending{};
+    Register m_activeWriteRegister{Register::U_SET}; ///< Captured at write dispatch time
+    uint16_t m_activeWriteData{};                    ///< Captured at write dispatch time
+    bool m_outputEnabled{false};                     ///< Tracks current ON_OFF state; toggled by applyControl()
+    bool m_onOffPending{false};                      ///< Queues an ON_OFF write when output enable state changes
+    bool m_iSetInitPending{};                        ///< Write I_SET=max on first init (OCP ceiling)
     uint8_t m_readsSinceLastWrite{};
     Timer m_messageTimer{};
 

@@ -10,6 +10,9 @@ void DPSxDcConverter::init()
     m_lastUpdateTime = 0;
     m_consecutiveErrors = 0;
     m_pauseRetrying = false;
+    m_outputEnabled   = false;
+    m_onOffPending    = false;
+    m_iSetInitPending = true;  // Set current limit ceiling to device max on startup
     m_errorRecoveryTimer.reset();
     m_messageTimer.reset();
 }
@@ -40,6 +43,15 @@ void DPSxDcConverter::applyControl(int controlValue)
         m_setPointValue = setPointValue;
         m_writeMessagePending = true;
     }
+
+    // Manage output enable/disable: ON_OFF=1 when charging, ON_OFF=0 when stopped.
+    // This ensures the DPS output relay tracks ChargeController intent, not DPS front-panel state.
+    const bool shouldBeEnabled = (controlValue > 0);
+    if (shouldBeEnabled != m_outputEnabled)
+    {
+        m_outputEnabled = shouldBeEnabled;
+        m_onOffPending  = true;
+    }
 }
 
 ActuatorIf::ControlMode DPSxDcConverter::getControlMode() const
@@ -59,7 +71,7 @@ int DPSxDcConverter::getMaxControl() const
 
 bool DPSxDcConverter::hasMeasurements() const
 {
-    return true;
+    return m_lastUpdateTime != 0;
 }
 
 void DPSxDcConverter::handleModbusMessages()
@@ -69,9 +81,27 @@ void DPSxDcConverter::handleModbusMessages()
     switch(m_messageState)
     {
         case ModbusState::IDLE:
-        if(m_writeMessagePending && m_readsSinceLastWrite >= MAX_READS_BEFORE_WRITE)
+        if (m_onOffPending)
         {
-            m_activeMessageType = ModbusMessageType::WRITE;
+            m_activeWriteRegister = Register::ON_OFF;
+            m_activeWriteData     = m_outputEnabled ? 1 : 0;
+            m_onOffPending        = false;
+            m_activeMessageType   = ModbusMessageType::WRITE;
+            m_readsSinceLastWrite = 0;
+        }
+        else if (m_iSetInitPending)
+        {
+            m_activeWriteRegister = Register::I_SET;
+            m_activeWriteData     = static_cast<uint16_t>(DPSxDcConverterConfig::MAX_MPPT_CURRENT_CONTROL_VALUE);
+            m_iSetInitPending     = false;
+            m_activeMessageType   = ModbusMessageType::WRITE;
+            m_readsSinceLastWrite = 0;
+        }
+        else if(m_writeMessagePending && m_readsSinceLastWrite >= MAX_READS_BEFORE_WRITE)
+        {
+            m_activeWriteRegister = selectRegisterType();
+            m_activeWriteData     = static_cast<uint16_t>(m_setPointValue);
+            m_activeMessageType   = ModbusMessageType::WRITE;
             m_readsSinceLastWrite = 0;
         }
         else
@@ -96,8 +126,7 @@ void DPSxDcConverter::handleModbusMessages()
         }
         else
         {
-            auto registerAddress {selectRegisterType()};
-            if(sendRegisterWriteReq(registerAddress, m_setPointValue) != FRAME_SIZE)
+            if(sendRegisterWriteReq(m_activeWriteRegister, m_activeWriteData) != FRAME_SIZE)
             {
                 m_messageState = ModbusState::ERROR;
                 ++m_consecutiveErrors;
@@ -133,8 +162,7 @@ void DPSxDcConverter::handleModbusMessages()
             }
             else
             {
-                auto registerAddress {selectRegisterType()};
-                if(receiveRegisterWriteRsp(registerAddress, m_setPointValue))
+                if(receiveRegisterWriteRsp(m_activeWriteRegister, m_activeWriteData))
                 {
                     m_writeMessagePending = false;
                     m_consecutiveErrors = 0; // Reset error count on successful write
@@ -188,7 +216,7 @@ std::vector<uint16_t> DPSxDcConverter::receiveRegisterReadRsp(uint16_t nrOfRegis
     std::vector<uint16_t> rawValues{};
     rawValues.reserve(nrOfRegisters);
 
-    if(Serial2.available() < SIZE) 
+    if(Serial2.available() < SIZE)
         return {};
 
     if(Serial2.readBytes(buffer, SIZE) != SIZE ||

@@ -11,7 +11,7 @@
 
 static constexpr uint8_t I2C_SCL_PIN             {22};
 static constexpr uint8_t I2C_SDA_PIN             {21};
-static constexpr uint8_t  PWM_PIN                {32};
+static constexpr uint8_t PWM_PIN                 {32};
 // Serial2 used for DPS Modbus RTU (9600 8N1).
 // ESP32 default Serial2 pins; re-assign here if rerouted on the PCB.
 static constexpr uint8_t SERIAL2_RX_PIN          {16};
@@ -25,16 +25,20 @@ static constexpr std::string_view DEVICE_ID {"solar_controller_1"};
 static const std::string AVAILABILITY_TOPIC {"solar/" + std::string{DEVICE_ID} + "/availability"};
 
 MqttClient::Config mqttConfig{
-    .broker        = "your_broker_address",
+    .broker        = "192.168.1.2",
     .port          = 1883,
-    .clientId      = "your_client_id",
-    .username      = "your_username",
-    .password      = "your_password",
-    .wifiSsid      = "your_wifi_ssid",
-    .wifiPassword  = "your_wifi_password",
+    .clientId      = DEVICE_ID,
+    .username      = "moci_mqtt",
+    .password      = "Mm21101981",
+    .wifiSsid      = "Net_2110",
+    .wifiPassword  = "MM2110981340709!",
     .willTopic     = AVAILABILITY_TOPIC,
     .willPayload   = "offline",
-    .onlinePayload = "online"
+    .onlinePayload = "online",
+    .staticIp      = IPAddress(192, 168, 1, 50),
+    .gateway       = IPAddress(192, 168, 1, 1),
+    .subnet        = IPAddress(255, 255, 255, 0),
+    .dns1          = IPAddress(192, 168, 1, 1),
 };
 MqttClient mqttClient{mqttConfig};
 #endif
@@ -67,19 +71,23 @@ void setup()
 {
     Serial.begin(115200);
     Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
+    Serial.println("[Main] setup() start");
 
     #ifdef MQTT_CLIENT
     Serial.println("[Main] Initialising MQTT client...");
     mqttClient.init();
+    Serial.println("[Main] mqttClient.init() done");
     #endif
 
     #ifdef MQTT_CLIENT
     bridge.init();
+    Serial.println("[Main] bridge.init() done");
     #endif
 
     #ifdef DPS_DC_CONVERTER
     Serial2.begin(9600, SERIAL_8N1, SERIAL2_RX_PIN, SERIAL2_TX_PIN);
     dpsDcConverter.init();
+    Serial.println("[Main] dpsDcConverter.init() done");
     #else
     pvSensor.init();
     batterySensor.init();
@@ -87,10 +95,13 @@ void setup()
     #endif
 
     controller.init();
+    Serial.println("[Main] controller.init() done");
 
     #ifdef MQTT_CLIENT
     otaHandler.init();
+    Serial.println("[Main] otaHandler.init() done");
     #endif
+    Serial.println("[Main] setup() complete");
 }
 
 void loop() 

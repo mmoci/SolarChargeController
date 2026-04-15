@@ -18,10 +18,12 @@ void MqttClient::process()
 {
     static unsigned long lastWifiAttempt{0};
     static unsigned long lastReconnectAttempt{0};
+    static bool wifiWasConnected{false};
 
     // Step 1: ensure WiFi is up — without it MQTT cannot connect.
     if (WiFi.status() != WL_CONNECTED)
     {
+        wifiWasConnected = false;
         const unsigned long now{millis()};
         if (now - lastWifiAttempt >= WIFI_RECONNECT_INTERVAL_MS)
         {
@@ -30,6 +32,12 @@ void MqttClient::process()
             WiFi.reconnect();
         }
         return; // Charging continues unaffected; MQTT waits for WiFi
+    }
+
+    if (!wifiWasConnected)
+    {
+        wifiWasConnected = true;
+        Serial.printf("[MqttClient] WiFi connected. IP: %s\n", WiFi.localIP().toString().c_str());
     }
 
     // Step 2: ensure MQTT broker connection is up.
@@ -52,10 +60,7 @@ void MqttClient::process()
 void MqttClient::publish(std::string_view topic, std::string_view payload, bool retain)
 {
     if (!m_mqttClient.connected())
-    {
-        Serial.printf("[MqttClient] Skipping publish — not connected. Topic: %s\n", topic.data());
         return;
-    }
 
     bool isPublished = m_mqttClient.publish(topic.data(), payload.data(), retain);
     if (!isPublished)
@@ -130,24 +135,34 @@ bool MqttClient::setupWifi()
     Serial.printf("[MqttClient] Connecting to WiFi: %s\n", m_config.wifiSsid.data());
 
     WiFi.mode(WIFI_STA);
+
+    if (m_config.staticIp)
+        WiFi.config(m_config.staticIp, m_config.gateway, m_config.subnet, m_config.dns1, m_config.dns2);
+
+    Serial.flush(); // Drain TX buffer before radio power-up causes voltage dip
     WiFi.begin(m_config.wifiSsid.data(), m_config.wifiPassword.data());
 
-    const unsigned long deadline{millis() + WIFI_CONNECT_TIMEOUT_MS};
-    while (WiFi.status() != WL_CONNECTED && millis() < deadline)
+    if (m_config.staticIp)
     {
-        delay(500);
-        Serial.print(".");
-    }
-
-    if (WiFi.status() != WL_CONNECTED)
-    {
-        Serial.printf("\n[MqttClient] WiFi unavailable after %lums — continuing in standalone mode.\n",
-                      WIFI_CONNECT_TIMEOUT_MS);
+        // Static IP: DHCP skipped, connects in ~300ms — safe to block briefly
+        const unsigned long deadline{millis() + WIFI_CONNECT_TIMEOUT_MS};
+        while (WiFi.status() != WL_CONNECTED && millis() < deadline)
+        {
+            delay(500);
+            Serial.print(".");
+            Serial.flush();
+        }
+        if (WiFi.status() == WL_CONNECTED)
+        {
+            Serial.printf("\n[MqttClient] WiFi connected. IP: %s\n", WiFi.localIP().toString().c_str());
+            return true;
+        }
+        Serial.println("\n[MqttClient] WiFi unavailable — continuing in standalone mode.");
         return false;
     }
 
-    Serial.printf("\n[MqttClient] WiFi connected. IP: %s\n", WiFi.localIP().toString().c_str());
-    return true;
+    // Dynamic IP: non-blocking — process() polls and reconnects
+    return false;
 }
 
 void MqttClient::subscribeAll()

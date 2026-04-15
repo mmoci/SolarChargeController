@@ -51,6 +51,12 @@ class MqttClient
         std::string_view willTopic;     ///< Availability topic — used for both LWT and online announce
         std::string_view willPayload;   ///< LWT payload published by broker on unexpected disconnect (typically "offline")
         std::string_view onlinePayload; ///< Payload published by client after every successful connect (typically "online")
+        // Optional static IP — if staticIp is set, DHCP is skipped (faster, no watchdog risk)
+        IPAddress staticIp{};
+        IPAddress gateway{};
+        IPAddress subnet{};
+        IPAddress dns1{};
+        IPAddress dns2{};
     };
 
     explicit MqttClient(const Config& config);
@@ -111,7 +117,7 @@ class MqttClient
     std::vector<ConnectCallback>                      m_connectCallbacks{};
     std::unordered_map<std::string, MessageCallback>  m_subscriptions{};
 
-    static constexpr unsigned long WIFI_CONNECT_TIMEOUT_MS  {30000}; ///< Max wait in init()
+    static constexpr unsigned long WIFI_CONNECT_TIMEOUT_MS  {10000}; ///< Max blocking wait in setupWifi() when using static IP
     static constexpr unsigned long WIFI_RECONNECT_INTERVAL_MS{30000}; ///< Retry interval in process()
     static constexpr unsigned long RECONNECT_INTERVAL_MS    { 5000}; ///< MQTT retry interval
 };
