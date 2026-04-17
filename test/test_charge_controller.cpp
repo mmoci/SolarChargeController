@@ -231,3 +231,19 @@ TEST_F(ChargeControllerTest, MpptOnlyPerturbs_WhenNewMeasurementArrives)
     controller.update();
     EXPECT_NE(actuator.getLastControl(), controlAfterFirst);
 }
+
+// Test that BatteryManager is not updated when battery measurements are stale.
+// On startup (e.g. DPS not yet responding) Vbatt=0mV would trip minSafeVoltage
+// and put BatteryManager into the terminal Fault state permanently.
+TEST_F(ChargeControllerTest, DoesNotFaultWhenBatteryMeasurementsStale)
+{
+    batteryMeasurements.setVoltage_mV(0);   // would trip fault if passed through
+    batteryMeasurements.setCurrent_mA(0);
+    batteryMeasurements.setValid(false);    // stale — no hardware response yet
+
+    for(int i = 0; i < 5; ++i)
+        controller.update();
+
+    EXPECT_NE(controller.getBatteryMode(), BatteryManager::Mode::Fault);
+    EXPECT_EQ(controller.getBatteryMode(), BatteryManager::Mode::Idle);
+}

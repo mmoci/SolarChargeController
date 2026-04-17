@@ -79,7 +79,11 @@ void ChargeController::update()
         mpptControl = softRampControl(mpptControl, ChargeControllerConfig::MAX_CONTROL_SOFT_STEP);
     }
 
-    m_batteryManager.update(batteryMeasurements, isChargingAvailable());
+    // Only update battery state machine when measurements are valid.
+    // Passing Vbatt=0 (no DPS response yet) would immediately trip the
+    // minSafeVoltage fault — a terminal state with no recovery.
+    if(m_batteryMeasurements->isMeasurementValid())
+        m_batteryManager.update(batteryMeasurements, isChargingAvailable());
 
     if(!m_batteryManager.isChargingAllowed())
     {
