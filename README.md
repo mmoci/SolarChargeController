@@ -263,7 +263,6 @@ Build flags:
 | `-D DPS_DC_CONVERTER` | Use DPS5005 Modbus actuator + measurements; omit for PWM + INA226 |
 | `-D MQTT_CLIENT` | Enable WiFi + MQTT telemetry and remote profile control |
 | `-D MQTT_MAX_PACKET_SIZE=2048` | Required for HomeAssistant discovery JSON payloads |
-| `-D CONFIG_LOG_DEFAULT_LEVEL=4` | ESP-IDF log level: 4 = DEBUG (all `ESP_LOGD` messages visible) |
 
 Library dependencies (`esp32dev`):
 | Library | Purpose |
@@ -271,13 +270,7 @@ Library dependencies (`esp32dev`):
 | `knolleary/PubSubClient` | MQTT transport |
 | `bblanchon/ArduinoJson @ ^7.0.0` | HomeAssistant discovery JSON serialisation |
 
-> **Log level**: ESP-IDF runtime log level defaults to ERROR. `setup()` calls `esp_log_level_set("*", ESP_LOG_DEBUG)` to enable all levels. To silence specific modules at runtime use `esp_log_level_set("TagName", ESP_LOG_WARN)`.
-
-Library dependencies (`esp32dev`):
-| Library | Purpose |
-|---|---|
-| `knolleary/PubSubClient` | MQTT transport |
-| `bblanchon/ArduinoJson @ ^7.0.0` | HomeAssistant discovery JSON serialisation |
+> **Log level**: `Logger.h` overrides `ESP_LOGI`/`ESP_LOGW`/`ESP_LOGD` to call `esp_log_write()` directly, bypassing the Arduino-ESP32 SDK's compile-time gate (`CONFIG_LOG_MAXIMUM_LEVEL=1`). The only remaining gate is the **runtime** filter: `esp_log_level_set("*", ESP_LOG_DEBUG)` in `setup()` enables all levels. To quiet a noisy module at runtime: `esp_log_level_set("DPSxDcConverter", ESP_LOG_WARN)`.
 
 Main entry point (`main.cpp`) instantiates components for the selected hardware variant and wires them together. All hardware-specific paths are guarded by preprocessor flags.
 

@@ -101,7 +101,7 @@ class DPSxDcConverter : public Device, public ActuatorIf
     static constexpr uint16_t MESSAGE_TMO {100}; // milliseconds
     static constexpr uint8_t  NUM_OF_REGISTERS_TO_READ {4};
     static constexpr uint8_t  MAX_READS_BEFORE_WRITE {3};
-    static constexpr uint16_t ERROR_RECOVERY_TMO {5000}; // milliseconds
+    static constexpr uint16_t ERROR_RECOVERY_TMO {10000}; // milliseconds
     static constexpr uint8_t  CONSECUTIVE_ERRORS_THRESHOLD {5};
 
     // ===== State Variables =====

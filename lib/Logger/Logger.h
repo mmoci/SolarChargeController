@@ -24,7 +24,25 @@
 #if defined(ESP32) || defined(ESP_PLATFORM)
     // ESP32 / ESP-IDF: use native logging — runtime level control available
     #include <esp_log.h>
-    // ESP_LOGE / ESP_LOGW / ESP_LOGI / ESP_LOGD already defined by ESP-IDF
+
+    // The Arduino-ESP32 precompiled SDK ships with CONFIG_LOG_MAXIMUM_LEVEL=1 (ERROR),
+    // which causes the compiler to strip ESP_LOGI/W/D call sites entirely via the
+    // outer '#if CONFIG_LOG_MAXIMUM_LEVEL >= N' guard in esp_log.h.
+    // Override those macros to call esp_log_write() directly, bypassing the compile-time
+    // gate while preserving runtime level filtering set by esp_log_level_set() in setup().
+    #ifdef ESP_LOGI
+        #undef ESP_LOGI
+    #endif
+    #ifdef ESP_LOGW
+        #undef ESP_LOGW
+    #endif
+    #ifdef ESP_LOGD
+        #undef ESP_LOGD
+    #endif
+    #define ESP_LOGI(tag, fmt, ...) esp_log_write(ESP_LOG_INFO,  tag, "I (%lu) %s: " fmt "\n", (unsigned long)esp_log_timestamp(), tag, ##__VA_ARGS__)
+    #define ESP_LOGW(tag, fmt, ...) esp_log_write(ESP_LOG_WARN,  tag, "W (%lu) %s: " fmt "\n", (unsigned long)esp_log_timestamp(), tag, ##__VA_ARGS__)
+    #define ESP_LOGD(tag, fmt, ...) esp_log_write(ESP_LOG_DEBUG, tag, "D (%lu) %s: " fmt "\n", (unsigned long)esp_log_timestamp(), tag, ##__VA_ARGS__)
+    // ESP_LOGE is left as-is — it already compiles in (level 1 <= CONFIG_LOG_MAXIMUM_LEVEL)
 
 #elif defined(ARDUINO)
     // Generic Arduino: Serial output, DEBUG suppressed

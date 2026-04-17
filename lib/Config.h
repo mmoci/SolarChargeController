@@ -23,9 +23,9 @@ namespace SensorConfig
 
 namespace ChargeControllerConfig
 {
-    static constexpr long PV_POWER_THRESHOLD {1000};           // 1W, When PV power is less or equal to 1W consider PV power unavailable (i.e. to small for charging)
+    static constexpr long PV_POWER_THRESHOLD           {1000};  // 1W, When PV power is less or equal to 1W consider PV power unavailable (i.e. to small for charging)
     static constexpr long PV_POWER_UNAVAILABLE_TIMEOUT {10000}; // 10sec, When PV power is unavailable for 10sec, set isChargingAvailable to false
-    static constexpr unsigned long STALE_LOG_INTERVAL {5000};   // 5sec, Minimum interval between repeated stale-measurement warnings
+    static constexpr unsigned long STALE_LOG_INTERVAL  {10000}; // 10sec, Minimum interval between repeated stale-measurement warnings
 
     static constexpr double Kp {1.0};
     static constexpr double Ki {0.01};

@@ -194,6 +194,7 @@ void DPSxDcConverter::handleModbusMessages()
             ESP_LOGE(TAG, "Too many consecutive errors: %d. Pausing...", m_consecutiveErrors);
             m_pauseRetrying = true;
             m_consecutiveErrors = 0;
+            m_errorRecoveryTimer.trigger();
         }
         m_messageState = ModbusState::IDLE;
         m_messageTimer.reset();
@@ -211,6 +212,8 @@ std::size_t DPSxDcConverter::sendRegisterReadReq(Register startAddress, uint16_t
     // Fills last 2 bytes of the FRAME_SIZE with CRC bytes.
     appendCRC16Bytes(buffer, FRAME_SIZE - 2);
 
+    ESP_LOGD(TAG, "Send register READ  [%02X %02X %02X %02X %02X %02X %02X %02X]",
+        buffer[0], buffer[1], buffer[2], buffer[3], buffer[4], buffer[5], buffer[6], buffer[7]);
     return Serial2.write(buffer, FRAME_SIZE);
 }
 
@@ -231,6 +234,9 @@ std::vector<uint16_t> DPSxDcConverter::receiveRegisterReadRsp(uint16_t nrOfRegis
         buffer[2] != nrOfRegisters * 2 ||
         !verifyCRC16(buffer, SIZE))
     {
+        ESP_LOGW(TAG, "Received register READ parse failed [%02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X]",
+            buffer[0], buffer[1], buffer[2], buffer[3], buffer[4], buffer[5], buffer[6],
+            buffer[7], buffer[8], buffer[9], buffer[10], buffer[11], buffer[12]);
         clearRxLine();
         return {};
     }
@@ -253,6 +259,8 @@ std::size_t DPSxDcConverter::sendRegisterWriteReq(Register address, uint16_t dat
     // Fills last 2 bytes of the FRAME_SIZE with CRC bytes.
     appendCRC16Bytes(buffer, FRAME_SIZE - 2);
 
+    ESP_LOGD(TAG, "Send register WRITE [%02X %02X %02X %02X %02X %02X %02X %02X]",
+        buffer[0], buffer[1], buffer[2], buffer[3], buffer[4], buffer[5], buffer[6], buffer[7]);
     return Serial2.write(buffer, FRAME_SIZE);
 }
 
@@ -266,17 +274,25 @@ bool DPSxDcConverter::receiveRegisterWriteRsp(Register address, uint16_t data, u
     if(Serial2.readBytes(buffer, FRAME_SIZE) != FRAME_SIZE)
         return false;
 
+    ESP_LOGD(TAG, "Received register WRITE [%02X %02X %02X %02X %02X %02X %02X %02X]",
+        buffer[0], buffer[1], buffer[2], buffer[3], buffer[4], buffer[5], buffer[6], buffer[7]);
+
     if(!verifyCRC16(buffer, FRAME_SIZE))
     {
+        ESP_LOGW(TAG, "Received register WRITE CRC failed");
         clearRxLine();
         return false;
     }
     
-    if( buffer[0] != slaveAddress)
+    if(buffer[0] != slaveAddress)
+    {
+        ESP_LOGW(TAG, "Received register WRITE wrong slave: got 0x%02X expected 0x%02X", buffer[0], slaveAddress);
         return false;
+    }
         
     if(buffer[1] != static_cast<uint8_t>(Function::WRITE_SINGLE_REGISTER))
     {
+        ESP_LOGW(TAG, "Received register WRITE wrong function: got 0x%02X", buffer[1]);
         clearRxLine();
         return false;
     }
@@ -285,13 +301,17 @@ bool DPSxDcConverter::receiveRegisterWriteRsp(Register address, uint16_t data, u
 
     if(receivedAddress != static_cast<uint16_t>(address))
     {
+        ESP_LOGW(TAG, "Received register WRITE wrong register: got 0x%04X expected 0x%04X", receivedAddress, static_cast<uint16_t>(address));
         clearRxLine();
         return false;
     }
 
     uint16_t receivedData = (buffer[4] << 8) | buffer[5];
     if(receivedData != data)
+    {
+        ESP_LOGW(TAG, "Received register WRITE wrong value: got %u expected %u", receivedData, data);
         return false;
+    }
 
     return true;
 }
