@@ -1,5 +1,8 @@
 #include "DPSxDcConverter.h"
 #include "Arduino.h"
+#include "Logger.h"
+
+static constexpr char TAG[] = "DPSxDcConverter";
 
 void DPSxDcConverter::init()
 {
@@ -24,7 +27,7 @@ void DPSxDcConverter::update()
         m_errorRecoveryTimer.update();
         if(m_errorRecoveryTimer.getDuration() >= ERROR_RECOVERY_TMO)
         {
-            Serial.println("[DPSxDcConverter] Resuming communication attempts after pause.");
+            ESP_LOGI(TAG, "Resuming communication after pause");
             m_pauseRetrying = false;
             m_errorRecoveryTimer.reset();
         }
@@ -51,6 +54,7 @@ void DPSxDcConverter::applyControl(int controlValue)
     {
         m_outputEnabled = shouldBeEnabled;
         m_onOffPending  = true;
+        ESP_LOGI(TAG, "Output %s", shouldBeEnabled ? "ENABLED" : "DISABLED");
     }
 }
 
@@ -120,7 +124,7 @@ void DPSxDcConverter::handleModbusMessages()
             {
                 m_messageState = ModbusState::ERROR;
                 ++m_consecutiveErrors;
-                Serial.println(String("[DPSxDcConverter] Failed to send read request (error #") + m_consecutiveErrors + ")");
+                ESP_LOGE(TAG, "Failed to send read request (error #%d)", m_consecutiveErrors);
                 break;
             }
         }
@@ -130,7 +134,7 @@ void DPSxDcConverter::handleModbusMessages()
             {
                 m_messageState = ModbusState::ERROR;
                 ++m_consecutiveErrors;
-                Serial.println(String("[DPSxDcConverter] Failed to send write request (error #") + m_consecutiveErrors + ")");
+                ESP_LOGE(TAG, "Failed to send write request (error #%d)", m_consecutiveErrors);
                 break;
             }
         }
@@ -155,6 +159,7 @@ void DPSxDcConverter::handleModbusMessages()
 
                     m_consecutiveErrors = 0; // Reset error count on successful read
                     m_lastUpdateTime = millis(); // Update last successful read time
+                    ESP_LOGD(TAG, "Read OK — Uout=%dmV Iout=%dmA Uin=%dmV", m_outVoltage_mV, m_outCurrent_mA, m_inVoltage_mV);
                     m_messageState = ModbusState::IDLE;
                     m_messageTimer.reset();
                     break;
@@ -167,6 +172,7 @@ void DPSxDcConverter::handleModbusMessages()
                     m_writeMessagePending = false;
                     m_consecutiveErrors = 0; // Reset error count on successful write
                     m_lastUpdateTime = millis(); // Update last successful write time
+                    ESP_LOGD(TAG, "Write OK \u2014 reg=0x%02X val=%d", static_cast<int>(m_activeWriteRegister), m_activeWriteData);
                     m_messageState = ModbusState::IDLE;
                     m_messageTimer.reset();
                     break;
@@ -177,7 +183,7 @@ void DPSxDcConverter::handleModbusMessages()
             {
                 m_messageState = ModbusState::ERROR;
                 ++m_consecutiveErrors;
-                Serial.println(String("[DPSxDcConverter] Message timeout (error #") + m_consecutiveErrors + ")");
+                ESP_LOGW(TAG, "Message timeout (error #%d)", m_consecutiveErrors);
             }
             break;
         }
@@ -185,7 +191,7 @@ void DPSxDcConverter::handleModbusMessages()
         case ModbusState::ERROR:
         if(m_consecutiveErrors >= CONSECUTIVE_ERRORS_THRESHOLD)
         {
-            Serial.println("[DPSxDcConverter] Too many consecutive errors: " + String(m_consecutiveErrors) + ". Pause connection...");
+            ESP_LOGE(TAG, "Too many consecutive errors: %d. Pausing...", m_consecutiveErrors);
             m_pauseRetrying = true;
             m_consecutiveErrors = 0;
         }

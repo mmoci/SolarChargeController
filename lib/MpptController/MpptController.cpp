@@ -1,4 +1,7 @@
 #include "MpptController.h"
+#include "Logger.h"
+
+static constexpr char TAG[] = "MpptController";
 
 void MpptController::init()
 {
@@ -21,11 +24,14 @@ void MpptController::update(Measurements pvMeasurements)
        m_step = constrain(static_cast<int>(K_STEP * std::abs(static_cast<float>(deltaPower_mW) / static_cast<float>(deltaVoltage_mV))), MIN_STEP, MAX_STEP
         );
 
-        // Debug output to observe dynamic step sizing behavior
-        Serial.printf("[MPPT] |dP/dV|=%.3f A, step=%d\n", std::abs(static_cast<float>(deltaPower_mW) / static_cast<float>(deltaVoltage_mV)), m_step);
-        
         if(deltaPower_mW < 0)
-            m_direction = (m_direction == Direction::Up) ? Direction::Down : Direction::Up; 
+            m_direction = (m_direction == Direction::Up) ? Direction::Down : Direction::Up;
+
+        // Debug output to observe dynamic step sizing and direction
+        ESP_LOGD(TAG, "|dP/dV|=%.3f, step=%d, dir=%s",
+                 std::abs(static_cast<float>(deltaPower_mW) / static_cast<float>(deltaVoltage_mV)),
+                 m_step,
+                 (m_direction == Direction::Up) ? "Up" : "Down");
     }
 
     if(m_direction == Direction::Up)

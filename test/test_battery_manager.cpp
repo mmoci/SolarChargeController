@@ -67,7 +67,7 @@ TEST_F(BatteryManagerTest, CcToConstantVoltageTransition)
 }
 
 // Test that charging is disabled when no power available
-TEST_F(BatteryManagerTest, ChargingDisabledWhenPowerUnavailable)
+TEST_F(BatteryManagerTest, ChargingRemainsAllowedImmediatelyAfterPowerLoss)
 {
     Measurements measurements{11000, 1000};
     
@@ -75,9 +75,9 @@ TEST_F(BatteryManagerTest, ChargingDisabledWhenPowerUnavailable)
     batteryManager.update(measurements, true);
     EXPECT_TRUE(batteryManager.isChargingAllowed());
     
-    // Update with charging not available
+    // Update with charging not available — still allowed immediately (timer not expired)
     batteryManager.update(measurements, false);
-    EXPECT_TRUE(batteryManager.isChargingAllowed());  // Should still be allowed immediately
+    EXPECT_TRUE(batteryManager.isChargingAllowed());
 }
 
 // Test fault condition when voltage too low
@@ -186,4 +186,90 @@ TEST_F(BatteryManagerTest, UpdateBatteryProfile_PreservesCurrentMode)
     // Hot-swap profile — mode must not reset to Idle
     batteryManager.updateBatteryProfile(BatteryConfig::LI_ION_3S_DEFAULT);
     EXPECT_EQ(batteryManager.getMode(), BatteryManager::Mode::CV);
+}
+
+// Test that Fault mode is terminal — no recovery even with good measurements
+TEST_F(BatteryManagerTest, FaultModeIsTerminal)
+{
+    // Below minSafeVoltage (9000mV) → Fault
+    Measurements measurements{8000, 1000};
+    batteryManager.update(measurements, true);
+    ASSERT_EQ(batteryManager.getMode(), BatteryManager::Mode::Fault);
+    EXPECT_FALSE(batteryManager.isChargingAllowed());
+
+    // Restore good voltage — Fault must persist (no self-recovery)
+    measurements.voltage_mV = 11000;
+    batteryManager.update(measurements, true);
+    EXPECT_EQ(batteryManager.getMode(), BatteryManager::Mode::Fault);
+    EXPECT_FALSE(batteryManager.isChargingAllowed());
+}
+
+// Test CV -> Done transition when cutoff current is met
+TEST_F(BatteryManagerTest, CvToDoneTransition)
+{
+    // Idle -> CC -> CV
+    Measurements measurements{11000, 1000};
+    batteryManager.update(measurements, true);  // -> CC
+    measurements.voltage_mV = 12600;
+    batteryManager.update(measurements, true);  // -> CV (12600 >= maxVoltage 12600)
+    ASSERT_EQ(batteryManager.getMode(), BatteryManager::Mode::CV);
+
+    // Current drops below cutoff (100mA) at max voltage -> Done
+    measurements.current_mA = 50;
+    batteryManager.update(measurements, true);
+    EXPECT_EQ(batteryManager.getMode(), BatteryManager::Mode::Done);
+    EXPECT_FALSE(batteryManager.isChargingAllowed());
+}
+
+// Test Done -> CC recharge when voltage drops to rechargeVoltage
+TEST_F(BatteryManagerTest, DoneToCcRechargeTransition)
+{
+    // Reach Done mode
+    Measurements measurements{11000, 1000};
+    batteryManager.update(measurements, true);  // -> CC
+    measurements.voltage_mV = 12600;
+    batteryManager.update(measurements, true);  // -> CV
+    measurements.current_mA = 50;
+    batteryManager.update(measurements, true);  // -> Done
+    ASSERT_EQ(batteryManager.getMode(), BatteryManager::Mode::Done);
+
+    // Voltage sags to rechargeVoltage (12400mV) -> CC
+    measurements.voltage_mV = 12400;
+    measurements.current_mA = 1000;
+    batteryManager.update(measurements, true);
+    EXPECT_EQ(batteryManager.getMode(), BatteryManager::Mode::CC);
+    EXPECT_TRUE(batteryManager.isChargingAllowed());
+}
+
+// Test that Precharge mode returns the prechargeCurrent limit (500mA), not the CC limit
+TEST_F(BatteryManagerTest, PrechargeCurrentLimitIs500mA)
+{
+    // 9500mV is between minSafe (9000) and precharge threshold (9600)
+    Measurements measurements{9500, 100};
+    batteryManager.update(measurements, true);
+    ASSERT_EQ(batteryManager.getMode(), BatteryManager::Mode::Precharge);
+
+    auto limit = batteryManager.getMaxChargingCurrentLimit();
+    EXPECT_TRUE(limit.has_value());
+    EXPECT_EQ(limit.value(), 500);   // prechargeCurrent_mA, NOT maxChargingCurrent_mA (10000)
+}
+
+// Test that charging disabled timer triggers Idle after 60s timeout
+TEST_F(BatteryManagerTest, TransitionsToIdleAfterChargingDisabledTimeout)
+{
+    // Reach CC mode
+    Measurements measurements{11000, 1000};
+    batteryManager.update(measurements, true);
+    ASSERT_EQ(batteryManager.getMode(), BatteryManager::Mode::CC);
+
+    // Charging becomes unavailable — triggers the 60s timer
+    reset_millis();
+    batteryManager.update(measurements, false);
+    EXPECT_EQ(batteryManager.getMode(), BatteryManager::Mode::CC);  // timer not expired yet
+
+    // Advance past 60s timeout
+    advance_millis(60001);
+    batteryManager.update(measurements, false);  // timer.update() -> getDuration > 60000 -> Idle
+    EXPECT_EQ(batteryManager.getMode(), BatteryManager::Mode::Idle);
+    EXPECT_FALSE(batteryManager.isChargingAllowed());
 }

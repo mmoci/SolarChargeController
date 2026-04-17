@@ -8,6 +8,9 @@
 #include "MqttSolarControllerBridge.h"
 #include "OtaHandler.h"
 #include "Utility.h"
+#include "Logger.h"
+
+static constexpr char TAG[] = "Main";
 
 static constexpr uint8_t I2C_SCL_PIN             {22};
 static constexpr uint8_t I2C_SDA_PIN             {21};
@@ -71,23 +74,23 @@ void setup()
 {
     Serial.begin(115200);
     Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
-    Serial.println("[Main] setup() start");
+    ESP_LOGI(TAG, "setup() start");
 
     #ifdef MQTT_CLIENT
-    Serial.println("[Main] Initialising MQTT client...");
+    ESP_LOGI(TAG, "Initialising MQTT client...");
     mqttClient.init();
-    Serial.println("[Main] mqttClient.init() done");
+    ESP_LOGI(TAG, "mqttClient.init() done");
     #endif
 
     #ifdef MQTT_CLIENT
     bridge.init();
-    Serial.println("[Main] bridge.init() done");
+    ESP_LOGI(TAG, "bridge.init() done");
     #endif
 
     #ifdef DPS_DC_CONVERTER
     Serial2.begin(9600, SERIAL_8N1, SERIAL2_RX_PIN, SERIAL2_TX_PIN);
     dpsDcConverter.init();
-    Serial.println("[Main] dpsDcConverter.init() done");
+    ESP_LOGI(TAG, "dpsDcConverter.init() done");
     #else
     pvSensor.init();
     batterySensor.init();
@@ -95,13 +98,13 @@ void setup()
     #endif
 
     controller.init();
-    Serial.println("[Main] controller.init() done");
+    ESP_LOGI(TAG, "controller.init() done");
 
     #ifdef MQTT_CLIENT
     otaHandler.init();
-    Serial.println("[Main] otaHandler.init() done");
+    ESP_LOGI(TAG, "otaHandler.init() done");
     #endif
-    Serial.println("[Main] setup() complete");
+    ESP_LOGI(TAG, "setup() complete");
 }
 
 void loop() 

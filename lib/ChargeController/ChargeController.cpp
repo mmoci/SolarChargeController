@@ -1,6 +1,9 @@
 #include "ChargeController.h"
 #include "DPSxDcConverter.h"
 #include "PwmDcConverter.h"
+#include "Logger.h"
+
+static constexpr char TAG[] = "ChargeController";
 
 void ChargeController::init()
 {
@@ -32,17 +35,29 @@ void ChargeController::update()
 
     if(!m_pvMeasurements->isMeasurementValid())
     {
-        Serial.println("[ChargeController] WARNING: PV measurements are stale!");
+        static unsigned long lastPvStaleLog{0};
+        const unsigned long now{millis()};
+        if (now - lastPvStaleLog >= ChargeControllerConfig::STALE_LOG_INTERVAL)
+        {
+            ESP_LOGW(TAG, "PV measurements stale — holding control at %d%%", m_mpptControl);
+            lastPvStaleLog = now;
+        }
         mpptControl = m_mpptControl;  // Maintain last known control to prevent sudden jumps when measurements are stale, but don't reset to 0 to allow soft recovery when PV measurements become valid again
     }
     else if(!m_batteryMeasurements->isMeasurementValid())
     {
-        Serial.println("[ChargeController] WARNING: Battery measurements are stale!");
+        static unsigned long lastBattStaleLog{0};
+        const unsigned long now{millis()};
+        if (now - lastBattStaleLog >= ChargeControllerConfig::STALE_LOG_INTERVAL)
+        {
+            ESP_LOGW(TAG, "Battery measurements stale — reducing control");
+            lastBattStaleLog = now;
+        }
         mpptControl = std::max(0, m_mpptControl - 10);  // Reduce charging current to prevent potential overcharging when battery measurements are unavailable
     }
     else
     {
-        handlePvPowerUnavailableTimer(pvMeasurements.voltage_mV * pvMeasurements.current_mA);
+        handlePvPowerUnavailableTimer(static_cast<long>(pvMeasurements.voltage_mV) * pvMeasurements.current_mA / 1000);
 
         // Only perturb the MPPT operating point when a genuinely new PV measurement
         // has arrived. With the DPS (Modbus ~100ms cycle) the control loop runs ~15x
@@ -112,13 +127,20 @@ void ChargeController::handlePvPowerUnavailableTimer(long pvPower_mW)
 {
     if(pvPower_mW <= ChargeControllerConfig::PV_POWER_THRESHOLD)
     {
-        if(m_pvPower_mW > ChargeControllerConfig::PV_POWER_THRESHOLD) 
+        if(m_pvPower_mW > ChargeControllerConfig::PV_POWER_THRESHOLD)
+        {
+            ESP_LOGI(TAG, "PV power dropped (%ld mW) — starting unavailable timer", pvPower_mW);
             m_pvPowerUnavailableTimer.trigger();
+        }
         else
             m_pvPowerUnavailableTimer.update();
     }
     else
+    {
+        if (m_pvPower_mW <= ChargeControllerConfig::PV_POWER_THRESHOLD && m_pvPower_mW != 0)
+            ESP_LOGI(TAG, "PV power recovered (%ld mW)", pvPower_mW);
         m_pvPowerUnavailableTimer.reset();
+    }
 
     m_pvPower_mW = pvPower_mW;
 }

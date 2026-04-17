@@ -1,4 +1,7 @@
 #include "SensorINA226.h"
+#include "Logger.h"
+
+static constexpr char TAG[] = "SensorINA226";
 
 SensorINA226::SensorINA226(uint16_t deviceAddress, int shunt_mOhm) : 
     SensorI2C(deviceAddress), m_shunt_mOhm{shunt_mOhm}
@@ -10,7 +13,7 @@ void SensorINA226::init()
 
     if(!m_isConnected)
     {
-        Serial.println("[SensorINA226]: Device is not connected!");
+        ESP_LOGE(TAG, "Device is not connected!");
         return;
     }
 
@@ -51,7 +54,7 @@ void SensorINA226::update()
     // Read bus voltage from register
     if(!readRegisterBytes(static_cast<uint16_t>(Registers::BusVoltage), buffer, REGISTERS_SIZE_IN_BYTES))
     {
-        Serial.println("[SensorINA226]: Reading register bytes for bus voltage failed, exiting update()!");
+        ESP_LOGE(TAG, "Reading register bytes for bus voltage failed, exiting update()!");
         return;
     }
               
@@ -61,7 +64,7 @@ void SensorINA226::update()
     // Read current from register
     if(!readRegisterBytes(static_cast<uint16_t>(Registers::Current), buffer, REGISTERS_SIZE_IN_BYTES))
     {
-        Serial.println("[SensorINA226]: Reading register bytes for current failed, exiting update()!");
+        ESP_LOGE(TAG, "Reading register bytes for current failed, exiting update()!");
         return;
     }
     int16_t rawCurrent{static_cast<int16_t>(buffer[0] << 8 | buffer[1])};

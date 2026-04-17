@@ -1,4 +1,7 @@
 #include "BatteryProfileSelector.h"
+#include "Logger.h"
+
+static constexpr char TAG[] = "BatteryProfileSelector";
 
 void BatteryProfileSelector::init()
 {
@@ -12,7 +15,7 @@ void BatteryProfileSelector::init()
     }
     if (err != ESP_OK) 
     {
-        Serial.printf("[BatteryProfileSelector] ERROR: Failed to initialize NVS! Error code: %d\n", err);
+        ESP_LOGE(TAG, "Failed to initialize NVS! Error code: %d", err);
         setProfileType(BatteryConfig::BatteryType::LIION_3S);
         return;
     }
@@ -21,7 +24,7 @@ void BatteryProfileSelector::init()
     err = nvs_open("battery", NVS_READWRITE, &m_nvsHandle);
     if (err != ESP_OK) 
     {
-        Serial.printf("[BatteryProfileSelector] ERROR: Failed to open NVS handle! Error code: %d\n", err);
+        ESP_LOGE(TAG, "Failed to open NVS handle! Error code: %d", err);
         return;
     }
 
@@ -29,7 +32,7 @@ void BatteryProfileSelector::init()
     size_t blobSize{};
     if (nvs_get_blob(m_nvsHandle, nvsKeyToString(NvsKey::BATTERY_PROFILE).data(), nullptr, &blobSize) == ESP_OK)
     {
-        Serial.println("[BatteryProfileSelector] Found old blob format, erasing...");
+        ESP_LOGW(TAG, "Found old blob format, erasing...");
         nvs_erase_key(m_nvsHandle, nvsKeyToString(NvsKey::BATTERY_PROFILE).data());
         nvs_commit(m_nvsHandle);
     }
@@ -37,8 +40,16 @@ void BatteryProfileSelector::init()
     // Load profile from NVS, if it fails load default profile
     if(loadProfileFromNVS() != Result::SUCCESS)
     {
-        Serial.println("[BatteryProfileSelector] WARNING: Failed to load profile from NVS, loading default profile.");
+        ESP_LOGW(TAG, "Failed to load profile from NVS, loading default profile");
         setProfileType(BatteryConfig::BatteryType::LIION_3S);
+    }
+    else
+    {
+        ESP_LOGI(TAG, "NVS profile loaded: type=%d maxV=%dmV rechargeV=%dmV maxI=%dmA",
+                 static_cast<int>(m_currentType),
+                 m_currentProfile.maxVoltage_mV,
+                 m_currentProfile.rechargeVoltage_mV,
+                 m_currentProfile.maxChargingCurrent_mA);
     }
 }
 
@@ -56,7 +67,7 @@ BatteryProfileSelector::Result BatteryProfileSelector::setProfileType(BatteryCon
     if(validationResult != Result::SUCCESS)
     {
         m_currentType = previousType; // restore on validation failure
-        Serial.println("[BatteryProfileSelector] ERROR: Invalid profile parameters!");
+        ESP_LOGE(TAG, "Invalid profile parameters!");
         return validationResult;
     }
 
@@ -72,7 +83,7 @@ BatteryProfileSelector::Result BatteryProfileSelector::setMaxVoltage(int maxVolt
     Result validationResult = validateProfile(modifiedProfile);
     if(validationResult != Result::SUCCESS)
     {
-        Serial.println("[BatteryProfileSelector] ERROR: Invalid max voltage parameter!");
+        ESP_LOGE(TAG, "Invalid max voltage parameter!");
         return validationResult;
     }
 
@@ -88,7 +99,7 @@ BatteryProfileSelector::Result BatteryProfileSelector::setRechargeVoltage(int re
     Result validationResult = validateProfile(modifiedProfile);
     if(validationResult != Result::SUCCESS)
     {
-        Serial.println("[BatteryProfileSelector] ERROR: Invalid recharge voltage parameter!");
+        ESP_LOGE(TAG, "Invalid recharge voltage parameter!");
         return validationResult;
     }
 
@@ -104,7 +115,7 @@ BatteryProfileSelector::Result BatteryProfileSelector::setPrechargeVoltage(int p
     Result validationResult = validateProfile(modifiedProfile);
     if(validationResult != Result::SUCCESS)
     {
-        Serial.println("[BatteryProfileSelector] ERROR: Invalid precharge voltage parameter!");
+        ESP_LOGE(TAG, "Invalid precharge voltage parameter!");
         return validationResult;
     }
 
@@ -120,7 +131,7 @@ BatteryProfileSelector::Result BatteryProfileSelector::setLoadDisconnectVoltage(
     Result validationResult = validateProfile(modifiedProfile);
     if(validationResult != Result::SUCCESS)
     {
-        Serial.println("[BatteryProfileSelector] ERROR: Invalid load disconnect voltage parameter!");
+        ESP_LOGE(TAG, "Invalid load disconnect voltage parameter!");
         return validationResult;
     }
 
@@ -136,7 +147,7 @@ BatteryProfileSelector::Result BatteryProfileSelector::setMaxChargingCurrent(int
     Result validationResult = validateProfile(modifiedProfile);
     if(validationResult != Result::SUCCESS)
     {
-        Serial.println("[BatteryProfileSelector] ERROR: Invalid max charging current parameter!");
+        ESP_LOGE(TAG, "Invalid max charging current parameter!");
         return validationResult;
     }
 
@@ -181,7 +192,7 @@ BatteryProfileSelector::Result BatteryProfileSelector::loadProfileFromNVS()
     esp_err_t err = nvs_get_u8(m_nvsHandle, nvsKeyToString(NvsKey::BATTERY_TYPE).data(), &batteryType);
     if (err != ESP_OK)
     {
-        Serial.println("[BatteryProfileSelector] ERROR: Failed to load battery type from NVS!");
+        ESP_LOGE(TAG, "Failed to load battery type from NVS!");
         return Result::NVS_LOAD_ERROR;
     }
 
@@ -214,7 +225,7 @@ BatteryProfileSelector::Result BatteryProfileSelector::loadProfileFromNVS()
     // Validate the loaded profile to ensure consistency
     if(validateProfile(m_currentProfile) != Result::SUCCESS)
     {
-        Serial.println("[BatteryProfileSelector] ERROR: Corrupted profile data loaded from NVS!");
+        ESP_LOGE(TAG, "Corrupted profile data loaded from NVS!");
         // Fall back to default
         m_currentProfile = BatteryConfig::getDefaultBatteryProfile(m_currentType);
         return Result::NVS_LOAD_ERROR;
@@ -229,7 +240,7 @@ BatteryProfileSelector::Result BatteryProfileSelector::saveProfileToNVS()
     esp_err_t err = nvs_set_u8(m_nvsHandle, nvsKeyToString(NvsKey::BATTERY_TYPE).data(), (uint8_t)m_currentType);
     if(err != ESP_OK)
     {
-        Serial.println("[BatteryProfileSelector] ERROR: Failed to save battery type to NVS!");
+        ESP_LOGE(TAG, "Failed to save battery type to NVS!");
         return Result::NVS_SAVE_ERROR;
     }
 
@@ -240,7 +251,7 @@ BatteryProfileSelector::Result BatteryProfileSelector::saveProfileToNVS()
         esp_err_t err = nvs_set_i32(m_nvsHandle, nvsKeyToString(NvsKey::MAX_VOLTAGE).data(), m_currentProfile.maxVoltage_mV);
         if(err != ESP_OK)
         {
-            Serial.println("[BatteryProfileSelector] ERROR: Failed to save max voltage to NVS!");
+            ESP_LOGE(TAG, "Failed to save max voltage to NVS!");
             return Result::NVS_SAVE_ERROR;
         }
     }
@@ -249,7 +260,7 @@ BatteryProfileSelector::Result BatteryProfileSelector::saveProfileToNVS()
         esp_err_t err = nvs_set_i32(m_nvsHandle, nvsKeyToString(NvsKey::RECHARGE_VOLTAGE).data(), m_currentProfile.rechargeVoltage_mV);
         if(err != ESP_OK)
         {
-            Serial.println("[BatteryProfileSelector] ERROR: Failed to save recharge voltage to NVS!");
+            ESP_LOGE(TAG, "Failed to save recharge voltage to NVS!");
             return Result::NVS_SAVE_ERROR;
         }
     }
@@ -258,7 +269,7 @@ BatteryProfileSelector::Result BatteryProfileSelector::saveProfileToNVS()
         esp_err_t err = nvs_set_i32(m_nvsHandle, nvsKeyToString(NvsKey::PRECHARGE_VOLTAGE).data(), m_currentProfile.prechargeVoltage_mV);
         if(err != ESP_OK)
         {
-            Serial.println("[BatteryProfileSelector] ERROR: Failed to save precharge voltage to NVS!");
+            ESP_LOGE(TAG, "Failed to save precharge voltage to NVS!");
             return Result::NVS_SAVE_ERROR;
         }
     }
@@ -267,7 +278,7 @@ BatteryProfileSelector::Result BatteryProfileSelector::saveProfileToNVS()
         esp_err_t err = nvs_set_i32(m_nvsHandle, nvsKeyToString(NvsKey::LOAD_DISCONNECT_VOLTAGE).data(), m_currentProfile.loadDisconnectVoltage_mV);
         if(err != ESP_OK)
         {
-            Serial.println("[BatteryProfileSelector] ERROR: Failed to save load disconnect voltage to NVS!");
+            ESP_LOGE(TAG, "Failed to save load disconnect voltage to NVS!");
             return Result::NVS_SAVE_ERROR;
         }
     }
@@ -276,7 +287,7 @@ BatteryProfileSelector::Result BatteryProfileSelector::saveProfileToNVS()
         esp_err_t err = nvs_set_i32(m_nvsHandle, nvsKeyToString(NvsKey::MAX_CHARGING_CURRENT).data(), m_currentProfile.maxChargingCurrent_mA);
         if(err != ESP_OK)
         {
-            Serial.println("[BatteryProfileSelector] ERROR: Failed to save max charging current to NVS!");
+            ESP_LOGE(TAG, "Failed to save max charging current to NVS!");
             return Result::NVS_SAVE_ERROR;
         }
     }
@@ -296,13 +307,13 @@ void BatteryProfileSelector::registerProfileObserver(BatteryProfileObserver prof
 
 void BatteryProfileSelector::printCurrentProfile() const
 {
-    Serial.println("Current Battery Profile:");
-    Serial.printf("Type: %d\n", static_cast<int>(m_currentType));
-    Serial.printf("Max Voltage (mV): %d\n", m_currentProfile.maxVoltage_mV);
-    Serial.printf("Recharge Voltage (mV): %d\n", m_currentProfile.rechargeVoltage_mV);
-    Serial.printf("Precharge Voltage (mV): %d\n", m_currentProfile.prechargeVoltage_mV);
-    Serial.printf("Load Disconnect Voltage (mV): %d\n", m_currentProfile.loadDisconnectVoltage_mV);
-    Serial.printf("Max Charging Current (mA): %d\n", m_currentProfile.maxChargingCurrent_mA);
+    ESP_LOGI(TAG, "Current Battery Profile:");
+    ESP_LOGI(TAG, "Type: %d", static_cast<int>(m_currentType));
+    ESP_LOGI(TAG, "Max Voltage (mV): %d", m_currentProfile.maxVoltage_mV);
+    ESP_LOGI(TAG, "Recharge Voltage (mV): %d", m_currentProfile.rechargeVoltage_mV);
+    ESP_LOGI(TAG, "Precharge Voltage (mV): %d", m_currentProfile.prechargeVoltage_mV);
+    ESP_LOGI(TAG, "Load Disconnect Voltage (mV): %d", m_currentProfile.loadDisconnectVoltage_mV);
+    ESP_LOGI(TAG, "Max Charging Current (mA): %d", m_currentProfile.maxChargingCurrent_mA);
 }
 
 const std::string_view BatteryProfileSelector::nvsKeyToString(NvsKey key) const
@@ -324,7 +335,7 @@ const std::string_view BatteryProfileSelector::nvsKeyToString(NvsKey key) const
         case NvsKey::MAX_CHARGING_CURRENT:
             return "max_charging_current";
         default:
-            Serial.println("[BatteryProfileSelector] ERROR: Unsupported NVS key!");
+            ESP_LOGE(TAG, "Unsupported NVS key!");
             return "";
     }
 }

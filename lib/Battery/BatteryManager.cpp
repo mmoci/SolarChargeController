@@ -1,4 +1,21 @@
 #include "BatteryManager.h"
+#include "Logger.h"
+
+static constexpr char TAG[] = "BatteryManager";
+
+static const char* modeToStr(BatteryManager::Mode mode)
+{
+    switch (mode)
+    {
+        case BatteryManager::Mode::Idle:      return "Idle";
+        case BatteryManager::Mode::Precharge: return "Precharge";
+        case BatteryManager::Mode::CC:        return "CC";
+        case BatteryManager::Mode::CV:        return "CV";
+        case BatteryManager::Mode::Done:      return "Done";
+        case BatteryManager::Mode::Fault:     return "Fault";
+        default:                              return "Unknown";
+    }
+}
 
 void BatteryManager::init(const BatteryProfile& profile)
 {
@@ -10,6 +27,8 @@ void BatteryManager::init(const BatteryProfile& profile)
 void BatteryManager::update(const Measurements& batteryMeasurements, bool chargingAvailable)
 {
     handleChargingDisabledTimer(chargingAvailable);
+
+    const Mode previousMode = m_mode;
 
     switch(m_mode)
     {
@@ -36,7 +55,10 @@ void BatteryManager::update(const Measurements& batteryMeasurements, bool chargi
         case Mode::Fault:
         handleFaultMode(batteryMeasurements, chargingAvailable);
         break;
-    }    
+    }
+
+    if (m_mode != previousMode)
+        ESP_LOGI(TAG, "Mode: %s -> %s (Vbatt=%dmV)", modeToStr(previousMode), modeToStr(m_mode), batteryMeasurements.voltage_mV);
 }
 
 void BatteryManager::updateBatteryProfile(const BatteryProfile& profile)
@@ -138,8 +160,7 @@ void BatteryManager::handleDoneMode(const Measurements& batteryMeasurements, boo
 
 void BatteryManager::handleFaultMode(const Measurements& batteryMeasurements, bool chargingAvailable)
 {
-    // We will not start charging in faulty state even with small current as battery chemistry could lead to fire.
-    Serial.println("[BatteryManager] Faulty state!");
+    // Fault is a terminal safety state — no recovery. Transition already logged in update().
 }
 
 void BatteryManager::handleChargingDisabledTimer(bool chargingAvailable)

@@ -1,6 +1,9 @@
 #ifdef MQTT_CLIENT
 #include "OtaHandler.h"
 #include <Arduino.h>
+#include "Logger.h"
+
+static constexpr char TAG[] = "OtaHandler";
 
 void OtaHandler::init()
 {
@@ -10,21 +13,21 @@ void OtaHandler::init()
     ActuatorIf* actuator = m_actuator;
     ArduinoOTA.onStart([actuator]()
     {
-        Serial.println("[OTA] Starting update — stopping actuator");
+        ESP_LOGI(TAG, "Starting update — stopping actuator");
         if (actuator)
             actuator->applyControl(0);
     });
     ArduinoOTA.onEnd([]()
     {
-        Serial.println("[OTA] Update complete");
+        ESP_LOGI(TAG, "Update complete");
     });
     ArduinoOTA.onError([](ota_error_t error)
     {
-        Serial.printf("[OTA] Error[%u]\n", error);
+        ESP_LOGE(TAG, "Error[%u]", error);
     });
 
     ArduinoOTA.begin();
-    Serial.printf("[OTA] Ready — hostname: %s\n", std::string{m_config.hostname}.c_str());
+    ESP_LOGI(TAG, "Ready — hostname: %s", std::string{m_config.hostname}.c_str());
 }
 
 void OtaHandler::handle()

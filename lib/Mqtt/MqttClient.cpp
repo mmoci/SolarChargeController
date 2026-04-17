@@ -1,5 +1,8 @@
 #include "MqttClient.h"
 #include <Arduino.h>
+#include "Logger.h"
+
+static constexpr char TAG[] = "MqttClient";
 
 MqttClient::MqttClient(const Config& config) : m_config{config}, m_mqttClient{m_wifiClient}
 {}
@@ -28,7 +31,7 @@ void MqttClient::process()
         if (now - lastWifiAttempt >= WIFI_RECONNECT_INTERVAL_MS)
         {
             lastWifiAttempt = now;
-            Serial.println("[MqttClient] WiFi disconnected — attempting reconnect...");
+            ESP_LOGW(TAG, "WiFi disconnected — attempting reconnect...");
             WiFi.reconnect();
         }
         return; // Charging continues unaffected; MQTT waits for WiFi
@@ -37,7 +40,7 @@ void MqttClient::process()
     if (!wifiWasConnected)
     {
         wifiWasConnected = true;
-        Serial.printf("[MqttClient] WiFi connected. IP: %s\n", WiFi.localIP().toString().c_str());
+        ESP_LOGI(TAG, "WiFi connected. IP: %s", WiFi.localIP().toString().c_str());
     }
 
     // Step 2: ensure MQTT broker connection is up.
@@ -64,7 +67,7 @@ void MqttClient::publish(std::string_view topic, std::string_view payload, bool 
 
     bool isPublished = m_mqttClient.publish(topic.data(), payload.data(), retain);
     if (!isPublished)
-        Serial.printf("[MqttClient] publish() failed for topic: %s\n", topic.data());
+        ESP_LOGE(TAG, "publish() failed for topic: %s", topic.data());
 }
 
 void MqttClient::subscribe(std::string_view topic, MessageCallback callback)
@@ -75,7 +78,7 @@ void MqttClient::subscribe(std::string_view topic, MessageCallback callback)
     if (m_mqttClient.connected())
     {
         m_mqttClient.subscribe(topic.data());
-        Serial.printf("[MqttClient] Subscribed: %s\n", topic.data());
+        ESP_LOGD(TAG, "Subscribed: %s", topic.data());
     }
 }
 
@@ -96,7 +99,7 @@ bool MqttClient::isConnected()
 
 bool MqttClient::connect()
 {
-    Serial.println("[MqttClient] Attempting MQTT connection...");
+    ESP_LOGI(TAG, "Attempting MQTT connection...");
 
     bool isConnected = m_mqttClient.connect(
         m_config.clientId.data(),
@@ -110,11 +113,11 @@ bool MqttClient::connect()
 
     if (!isConnected)
     {
-        Serial.printf("[MqttClient] Connection failed, PubSubClient state: %d\n", m_mqttClient.state());
+        ESP_LOGE(TAG, "Connection failed, PubSubClient state: %d", m_mqttClient.state());
         return false;
     }
 
-    Serial.println("[MqttClient] Connected to broker.");
+    ESP_LOGI(TAG, "Connected to broker");
 
     // Publish "online" status if configured (willTopic is used for both LWT and online announce)
     if (!m_config.onlinePayload.empty())
@@ -132,7 +135,7 @@ bool MqttClient::connect()
 
 bool MqttClient::setupWifi()
 {
-    Serial.printf("[MqttClient] Connecting to WiFi: %s\n", m_config.wifiSsid.data());
+    ESP_LOGI(TAG, "Connecting to WiFi: %s", m_config.wifiSsid.data());
 
     WiFi.mode(WIFI_STA);
 
@@ -154,10 +157,10 @@ bool MqttClient::setupWifi()
         }
         if (WiFi.status() == WL_CONNECTED)
         {
-            Serial.printf("\n[MqttClient] WiFi connected. IP: %s\n", WiFi.localIP().toString().c_str());
+            ESP_LOGI(TAG, "WiFi connected. IP: %s", WiFi.localIP().toString().c_str());
             return true;
         }
-        Serial.println("\n[MqttClient] WiFi unavailable — continuing in standalone mode.");
+        ESP_LOGW(TAG, "WiFi unavailable — continuing in standalone mode");
         return false;
     }
 
@@ -176,11 +179,11 @@ void MqttClient::dispatchMessage(char* topic, byte* payload, unsigned int length
     std::string_view strTopic{topic};
     std::string_view strPayload{reinterpret_cast<char*>(payload), length};
 
-    Serial.printf("[MqttClient] Received [%s]: %.*s\n", topic, (int)length, (char*)payload);
+    ESP_LOGD(TAG, "Received [%s]: %.*s", topic, (int)length, (char*)payload);
 
     auto it = m_subscriptions.find(std::string{strTopic});
     if (it != m_subscriptions.end())
         it->second(strPayload);
     else
-        Serial.printf("[MqttClient] No handler for topic: %s\n", topic);
+        ESP_LOGW(TAG, "No handler for topic: %s", topic);
 }

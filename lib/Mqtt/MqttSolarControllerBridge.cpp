@@ -4,6 +4,9 @@
 #include <sstream>
 #include <iomanip>
 #include "Utility.h"
+#include "Logger.h"
+
+static constexpr char TAG[] = "Bridge";
 
 // ---------------------------------------------------------------------------
 // Constructor
@@ -98,7 +101,7 @@ void MqttSolarControllerBridge::onBatteryTypeSet(std::string_view payload)
     auto type = stringToBatteryType(payload);
     if (!type.has_value())
     {
-        Serial.printf("[Bridge] Unknown battery_type payload: %.*s\n",
+        ESP_LOGW(TAG, "Unknown battery_type payload: %.*s",
                       static_cast<int>(payload.size()), payload.data());
         return;
     }
@@ -106,10 +109,11 @@ void MqttSolarControllerBridge::onBatteryTypeSet(std::string_view payload)
     auto result = m_profileSelector.setProfileType(*type);
     if (result != BatteryProfileSelector::Result::SUCCESS)
     {
-        Serial.printf("[Bridge] setProfileType failed (err=%d)\n", static_cast<int>(result));
+        ESP_LOGE(TAG, "setProfileType failed (err=%d)", static_cast<int>(result));
         return;
     }
 
+    ESP_LOGI(TAG, "Battery type set to %.*s", static_cast<int>(payload.size()), payload.data());
     publishProfileState();
 }
 
@@ -118,7 +122,7 @@ void MqttSolarControllerBridge::handleIntCommand(std::string_view name, std::str
     int value{};
     if (!parseIntSafe(payload, value))
     {
-        Serial.printf("[Bridge] Invalid %.*s payload: %.*s\n", static_cast<int>(name.size()), name.data(), static_cast<int>(payload.size()), payload.data());
+        ESP_LOGW(TAG, "Invalid %.*s payload: %.*s", static_cast<int>(name.size()), name.data(), static_cast<int>(payload.size()), payload.data());
         return;
     }
 
@@ -127,10 +131,11 @@ void MqttSolarControllerBridge::handleIntCommand(std::string_view name, std::str
 
     if (result != BatteryProfileSelector::Result::SUCCESS)
     {
-        Serial.printf("[Bridge] Setting %.*s=%d rejected (err=%d)\n", static_cast<int>(name.size()), name.data(), value, static_cast<int>(result));
+        ESP_LOGW(TAG, "Setting %.*s=%d rejected (err=%d)", static_cast<int>(name.size()), name.data(), value, static_cast<int>(result));
         return;
     }
 
+    ESP_LOGI(TAG, "%.*s set to %d", static_cast<int>(name.size()), name.data(), value);
     publishProfileState();
 }
 

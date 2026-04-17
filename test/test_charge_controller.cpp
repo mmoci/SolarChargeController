@@ -48,22 +48,40 @@ TEST_F(ChargeControllerTest, BasicChargingOperation)
     EXPECT_NE(lastControl, -1);
 }
 
-// Test stops charging when PV power unavailable
+// Test stops charging when PV power unavailable (time-based)
 TEST_F(ChargeControllerTest, StopsChargingWhenPVPowerUnavailable)
 {
-    // Test that low PV power leads to charging being disabled eventually
-    // This is a simplified version that doesn't depend on exact timing
-    pvMeasurements.setVoltage_mV(1000);
-    pvMeasurements.setCurrent_mA(100);   // 0.1W, below threshold
-    batteryMeasurements.setVoltage_mV(11000);
-    batteryMeasurements.setCurrent_mA(1000);
-    
-    // Do initial update
+    reset_millis();
+
+    // Establish CC mode with high PV power (>1W threshold)
+    pvMeasurements.setVoltage_mV(18000);
+    pvMeasurements.setCurrent_mA(5000);  // 90W
     controller.update();
-    
-    // The control value should eventually become 0 or very low
-    // We can't test exact timing without proper time advancement
-    EXPECT_NO_FATAL_FAILURE(controller.update());
+    ASSERT_EQ(controller.getBatteryMode(), BatteryManager::Mode::CC);
+
+    // PV power drops below 1W threshold at millis()=1 — triggers pvPowerUnavailableTimer.
+    // ChargeController converts voltage_mV * current_mA / 1000 → mW before comparing
+    // against PV_POWER_THRESHOLD = 1000 mW (1 W). Values must produce < 1000 mW.
+    advance_millis(1);
+    pvMeasurements.setVoltage_mV(1000);
+    pvMeasurements.setCurrent_mA(500);   // 1000*500/1000 = 500 mW < threshold 1000 mW
+    controller.update();
+
+    // Still charging at 9s: timer not yet expired (needs 10s)
+    advance_millis(9000);
+    controller.update();
+    EXPECT_EQ(controller.getBatteryMode(), BatteryManager::Mode::CC);
+
+    // PV unavailable at 10002ms: isChargingAvailable() = false — BatteryManager sees false
+    // This triggers the 60s charging-disabled timer in BatteryManager
+    advance_millis(1001);
+    controller.update();
+
+    // Advance past 60s charging-disabled timeout — CC transitions to Idle
+    advance_millis(60001);
+    controller.update();
+    EXPECT_EQ(controller.getBatteryMode(), BatteryManager::Mode::Idle);
+    EXPECT_EQ(actuator.getLastControl(), 0);
 }
 
 // Test handles stale PV measurements
@@ -145,20 +163,19 @@ TEST_F(ChargeControllerTest, RespectsBatteryLimits)
 // Test disables charging when battery full
 TEST_F(ChargeControllerTest, DisablesChargingWhenBatteryFull)
 {
-    // Set battery to charged state (done charging)
+    // Set battery to charged state (done charging): at max voltage with current below cutoff
     pvMeasurements.setVoltage_mV(18000);
     pvMeasurements.setCurrent_mA(5000);
-    batteryMeasurements.setVoltage_mV(12600);  // Max voltage
-    batteryMeasurements.setCurrent_mA(50);     // Very low current (<100mA cutoff)
+    batteryMeasurements.setVoltage_mV(12600);  // maxVoltage_mV
+    batteryMeasurements.setCurrent_mA(50);     // below cutoffCurrent_mA (100mA)
     
-    for(int i = 0; i < 10; ++i)
-    {
+    // Idle -> CC -> CV -> Done requires 3 updates:
+    for(int i = 0; i < 5; ++i)
         controller.update();
-    }
     
-    // Should eventually apply 0 control when battery reports full
-    int lastControl = actuator.getLastControl();
-    EXPECT_LE(lastControl, 10);  // Should be close to 0
+    // Done mode: isChargingAllowed() = false -> applyControl(0)
+    EXPECT_EQ(controller.getBatteryMode(), BatteryManager::Mode::Done);
+    EXPECT_EQ(actuator.getLastControl(), 0);
 }
 
 // Test zero control with zero PV power
@@ -191,4 +208,26 @@ TEST_F(ChargeControllerTest, HandlesRapidPvChanges)
             controller.update();
         });
     }
+}
+
+// Test MPPT only perturbs when lastTimeUpdated reports a new hardware read
+TEST_F(ChargeControllerTest, MpptOnlyPerturbs_WhenNewMeasurementArrives)
+{
+    // Static timestamp: same measurement repeated (no new hardware read)
+    pvMeasurements.setLastUpdate(100);
+    pvMeasurements.setVoltage_mV(18000);
+    pvMeasurements.setCurrent_mA(5000);
+
+    // First call: m_lastPvUpdateAge==0 -> perturbs unconditionally, sets m_lastPvUpdateAge=100
+    controller.update();
+    int controlAfterFirst = actuator.getLastControl();
+
+    // Second call: pvUpdateAge=100, m_lastPvUpdateAge=100 -> 100<100 false, 100==0 false -> no perturb
+    controller.update();
+    EXPECT_EQ(actuator.getLastControl(), controlAfterFirst);
+
+    // New measurement arrived: pvUpdateAge=5 < m_lastPvUpdateAge=100 -> perturbs
+    pvMeasurements.setLastUpdate(5);
+    controller.update();
+    EXPECT_NE(actuator.getLastControl(), controlAfterFirst);
 }

@@ -116,10 +116,18 @@ homeassistant/{component}/{deviceId}/{objectId}/config
 - Voltage and current data structures
 - Stale-measurement detection (`isMeasurementValid()` / `lastTimeUpdated()`)
 
+#### **Logger** (`Logger/`)
+Portable logging shim that routes log calls to the appropriate backend:
+- **ESP32**: delegates to `esp_log.h` macros (`ESP_LOGI`, `ESP_LOGW`, `ESP_LOGE`, `ESP_LOGD`) — full log-level filtering via `esp_log_level_set`
+- **Arduino (non-ESP32)**: maps to `Serial.printf` with level prefix
+- **Native test target**: only errors go to `stderr`; all other levels are suppressed (keeps test output clean)
+- Enables the same `ESP_LOG*` call sites in all `.cpp` files regardless of build target
+
 #### **Configuration** (`Config.h`)
 Build-time and runtime configuration constants:
 - INA226 I2C addresses and shunt resistor values (with `PV_SHUNT_mOhm` / `BATTERY_SHUNT_mOhm`)
 - Charge controller PI gains and soft-ramp step sizes (tuned separately for DPS/PWM via `#ifdef`)
+- `STALE_LOG_INTERVAL` (5 s): minimum interval between repeated stale-measurement warnings, preventing serial flood during sensor loss
 - Predefined battery profiles (`LI_ION_3S_DEFAULT`, `LI_ION_4S_DEFAULT`, `LIFEPO4_4S_DEFAULT`, `CUSTOM_DEFAULT`)
 
 #### **Utilities** (`Utility.h`)
@@ -185,13 +193,13 @@ Solar Panel → PV Sensors → ChargeController → MPPT Algorithm → PWM/DPS A
 
 ## Testing
 
-The project includes comprehensive unit tests:
-- `test_battery_manager.cpp`: Battery state machine and charging mode transitions
-- `test_charge_controller.cpp`: Main controller logic and MPPT integration
+The project includes comprehensive unit tests (**61 test cases**, all passing):
+- `test_battery_manager.cpp`: Battery state machine and charging mode transitions — including Fault terminal state, CV→Done, Done→CC recharge, precharge current cap (500 mA), and charging-disabled timeout (60 s)
+- `test_charge_controller.cpp`: Main controller logic and MPPT integration — including time-based PV power unavailability, stale-measurement handling, and MPPT gate (only perturbs on fresh measurements)
 - `test_mppt_controller.cpp`: MPPT algorithm verification
 - `test_utility.cpp`: Helper function validation
 
-Mock implementations provided for testing without hardware.
+Mock implementations provided for testing without hardware. Time-dependent tests use `advance_millis()` / `reset_millis()` helpers in `Arduino_impl.cpp` to control `millis()` deterministically.
 
 ## Current Status & Future Improvements
 
@@ -201,7 +209,7 @@ Mock implementations provided for testing without hardware.
 ✓ MPPT algorithm implementation (Perturb & Observe)
 ✓ PI control for voltage/current limiting
 ✓ Dual hardware support (PWM & DPS5005 via Modbus RTU)
-✓ Unit testing framework (Google Test, native platform)
+✓ Unit testing framework (Google Test, native platform) — 61 tests
 ✓ NVS-backed battery profile selection with runtime field overrides (`BatteryProfileSelector`)
 ✓ MQTT telemetry publishing (PV, battery, charging mode, control signal)
 ✓ Remote battery profile management via MQTT commands
@@ -209,33 +217,44 @@ Mock implementations provided for testing without hardware.
 ✓ MQTT availability state (Last Will + online announce)
 ✓ Corrected DPS5005 Modbus register map and measurement unit conversions
 ✓ Corrected INA226 I2C addresses and shunt resistor configuration
+✓ Portable logging shim (`Logger.h`) — ESP_LOG on ESP32, Serial on Arduino, stderr on native
+✓ State transition logging in `BatteryManager` with mode names and battery voltage
+✓ Rate-limited stale-measurement warnings (configurable via `STALE_LOG_INTERVAL`)
+✓ PV power drop/recovery transition logging with correct mW units
 
 ### Planned Improvements
-- [   ] CRC lookup table optimization for DPS Modbus CRC16 computation
-- [   ] Temperature compensation — sensor integration for thermal derating
-- [   ] Extended diagnostics — efficiency tracking, error logging, performance metrics
-- [   ] Configuration web UI — runtime tuning without recompilation
-- [   ] INA226 averaging and alert threshold configuration
-- [ x ] WiFi timeout + standalone fallback	Safety — device must charge without WiFi
-- [ x ] Gate MPPT on fresh measurements (DPS)	Correctness — MPPT currently over-samples
-- [ x ] Variable-step P&O	Efficiency — eliminates steady-state MPP oscillation
-- [ x ] UX: don't restart on every field change → solved by hot-reload
-- [   ] Load disconnect GPIO Hardware completeness
-- [ x ] Float telemetry (V/A/W)	HA display quality
-- [ x ] OTA firmware update	Essential for any field-deployed WiFi device
-- [ x ] Efficiency calculation (η = P_out/P_in)	Useful telemetry for system monitoring
+
+| Status | Item | Notes |
+|--------|------|-------|
+| ✓ | WiFi timeout + standalone fallback | Device charges without WiFi |
+| ✓ | Gate MPPT on fresh measurements (DPS) | Only perturbs when new Modbus read arrives |
+| ✓ | Variable-step P&O | Eliminates steady-state MPP oscillation |
+| ✓ | Hot-reload battery profile fields | No restart on field change via MQTT |
+| ✓ | Float telemetry (V/A/W) | HA display quality |
+| ✓ | OTA firmware update | Essential for field-deployed devices |
+| ✓ | Efficiency calculation (η = P_out/P_in) | Published as telemetry |
+| ✓ | Portable logging shim | `Logger.h` — uniform `ESP_LOG*` across all targets |
+| [ ] | Load disconnect GPIO | Cut load when battery below `loadDisconnectVoltage_mV` |
+| [ ] | Load disconnect hysteresis | Prevent rapid cycling at threshold boundary |
+| [ ] | CRC lookup table for DPS Modbus | Optimise CRC16 computation |
+| [ ] | Temperature compensation | Thermal derating via external sensor |
+| [ ] | INA226 averaging / alert config | Reduce noise on measurements |
+| [ ] | Configuration web UI | Runtime tuning without recompilation |
 
 ## Integration Notes
 
-Include files are configured via `platformio.ini`:
+Include paths configured in `platformio.ini` (shared across `esp32dev` and `esp32dev-test`):
 ```
+-Ilib
 -Ilib/Battery
 -Ilib/ChargeController
 -Ilib/Measurements
 -Ilib/MpptController
 -Ilib/Sensors
 -Ilib/Actuators
--Ilib/Mqtt
+-Ilib/Logger
+-Ilib/Mqtt          (esp32dev only)
+-Ilib/OtaHandler    (esp32dev only)
 ```
 
 Build flags:
@@ -244,6 +263,13 @@ Build flags:
 | `-D DPS_DC_CONVERTER` | Use DPS5005 Modbus actuator + measurements; omit for PWM + INA226 |
 | `-D MQTT_CLIENT` | Enable WiFi + MQTT telemetry and remote profile control |
 | `-D MQTT_MAX_PACKET_SIZE=2048` | Required for HomeAssistant discovery JSON payloads |
+| `-D CONFIG_LOG_DEFAULT_LEVEL=4` | ESP-IDF log level: 4 = DEBUG (all `ESP_LOGD` messages visible) |
+
+Library dependencies (`esp32dev`):
+| Library | Purpose |
+|---|---|
+| `knolleary/PubSubClient` | MQTT transport |
+| `bblanchon/ArduinoJson @ ^7.0.0` | HomeAssistant discovery JSON serialisation |
 
 Main entry point (`main.cpp`) instantiates components for the selected hardware variant and wires them together. All hardware-specific paths are guarded by preprocessor flags.
 
