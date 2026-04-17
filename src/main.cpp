@@ -73,6 +73,9 @@ MqttSolarControllerBridge bridge{mqttClient, profileSelector, DEVICE_ID};
 void setup() 
 {
     Serial.begin(115200);
+#if defined(ESP32) || defined(ESP_PLATFORM)
+    esp_log_level_set("*", ESP_LOG_DEBUG);
+#endif
     Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
     ESP_LOGI(TAG, "setup() start");
 

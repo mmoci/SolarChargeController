@@ -271,6 +271,14 @@ Library dependencies (`esp32dev`):
 | `knolleary/PubSubClient` | MQTT transport |
 | `bblanchon/ArduinoJson @ ^7.0.0` | HomeAssistant discovery JSON serialisation |
 
+> **Log level**: ESP-IDF runtime log level defaults to ERROR. `setup()` calls `esp_log_level_set("*", ESP_LOG_DEBUG)` to enable all levels. To silence specific modules at runtime use `esp_log_level_set("TagName", ESP_LOG_WARN)`.
+
+Library dependencies (`esp32dev`):
+| Library | Purpose |
+|---|---|
+| `knolleary/PubSubClient` | MQTT transport |
+| `bblanchon/ArduinoJson @ ^7.0.0` | HomeAssistant discovery JSON serialisation |
+
 Main entry point (`main.cpp`) instantiates components for the selected hardware variant and wires them together. All hardware-specific paths are guarded by preprocessor flags.
 
 
