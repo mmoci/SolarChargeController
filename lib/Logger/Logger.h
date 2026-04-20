@@ -30,6 +30,9 @@
     // outer '#if CONFIG_LOG_MAXIMUM_LEVEL >= N' guard in esp_log.h.
     // Override those macros to call esp_log_write() directly, bypassing the compile-time
     // gate while preserving runtime level filtering set by esp_log_level_set() in setup().
+    #ifdef ESP_LOGE
+        #undef ESP_LOGE
+    #endif
     #ifdef ESP_LOGI
         #undef ESP_LOGI
     #endif
@@ -39,10 +42,10 @@
     #ifdef ESP_LOGD
         #undef ESP_LOGD
     #endif
-    #define ESP_LOGI(tag, fmt, ...) esp_log_write(ESP_LOG_INFO,  tag, "I (%lu) %s: " fmt "\n", (unsigned long)esp_log_timestamp(), tag, ##__VA_ARGS__)
-    #define ESP_LOGW(tag, fmt, ...) esp_log_write(ESP_LOG_WARN,  tag, "W (%lu) %s: " fmt "\n", (unsigned long)esp_log_timestamp(), tag, ##__VA_ARGS__)
-    #define ESP_LOGD(tag, fmt, ...) esp_log_write(ESP_LOG_DEBUG, tag, "D (%lu) %s: " fmt "\n", (unsigned long)esp_log_timestamp(), tag, ##__VA_ARGS__)
-    // ESP_LOGE is left as-is — it already compiles in (level 1 <= CONFIG_LOG_MAXIMUM_LEVEL)
+    #define ESP_LOGE(tag, fmt, ...) esp_log_write(ESP_LOG_ERROR, tag, "[ERROR] (%lu) %s: " fmt "\n", (unsigned long)esp_log_timestamp(), tag, ##__VA_ARGS__)
+    #define ESP_LOGI(tag, fmt, ...) esp_log_write(ESP_LOG_INFO,  tag, "[INFO] (%lu) %s: " fmt "\n", (unsigned long)esp_log_timestamp(), tag, ##__VA_ARGS__)
+    #define ESP_LOGW(tag, fmt, ...) esp_log_write(ESP_LOG_WARN,  tag, "[WARNING] (%lu) %s: " fmt "\n", (unsigned long)esp_log_timestamp(), tag, ##__VA_ARGS__)
+    #define ESP_LOGD(tag, fmt, ...) esp_log_write(ESP_LOG_DEBUG, tag, "[DEBUG] (%lu) %s: " fmt "\n", (unsigned long)esp_log_timestamp(), tag, ##__VA_ARGS__)
 
 #elif defined(ARDUINO)
     // Generic Arduino: Serial output, DEBUG suppressed

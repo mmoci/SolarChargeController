@@ -76,7 +76,7 @@ void ChargeController::update()
         mpptControl = m_mpptController.getRequestedOutput();
 
         // Implements a soft ramping mechanism for the MPPT control value. The soft ramping is applied on every update to ensure smooth transitions in control output.
-        mpptControl = softRampControl(mpptControl, ChargeControllerConfig::MAX_CONTROL_SOFT_STEP);
+        mpptControl = softRampControl(mpptControl, m_actuator->getMaxSoftStep());
     }
 
     // Only update battery state machine when measurements are valid.

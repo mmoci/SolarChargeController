@@ -1,9 +1,6 @@
 #include "ChargeController.h"
 #include "BatteryProfileSelector.h"
-#include "SensorINA226.h"      // Concrete sensor
-#include "PwmDcConverter.h"    // Concrete PWM actuator
-#include "DPSxDcConverter.h"   // Concrete DPS actuator
-#include "DPSxMeasurements.h"
+#include "Initializer.h"
 #include "MqttClient.h"
 #include "MqttSolarControllerBridge.h"
 #include "OtaHandler.h"
@@ -11,14 +8,6 @@
 #include "Logger.h"
 
 static constexpr char TAG[] = "Main";
-
-static constexpr uint8_t I2C_SCL_PIN             {22};
-static constexpr uint8_t I2C_SDA_PIN             {21};
-static constexpr uint8_t PWM_PIN                 {32};
-// Serial2 used for DPS Modbus RTU (9600 8N1).
-// ESP32 default Serial2 pins; re-assign here if rerouted on the PCB.
-static constexpr uint8_t SERIAL2_RX_PIN          {16};
-static constexpr uint8_t SERIAL2_TX_PIN          {17};
 
 
 #ifdef MQTT_CLIENT
@@ -52,22 +41,13 @@ BatteryProfileSelector profileSelector{};
 MqttSolarControllerBridge bridge{mqttClient, profileSelector, DEVICE_ID};
 #endif
 
-#ifdef DPS_DC_CONVERTER
-    DPSxDcConverter dpsDcConverter{};
-    DPSxMeasurements pvMeasurements{&dpsDcConverter, DPSxMeasurements::MeasurementSource::Input};
-    DPSxMeasurements batteryMeasurements{&dpsDcConverter, DPSxMeasurements::MeasurementSource::Output};
-    ChargeController controller{&pvMeasurements, &batteryMeasurements, &dpsDcConverter, &profileSelector};
-    #ifdef MQTT_CLIENT
-    OtaHandler otaHandler{{.hostname = DEVICE_ID, .password = "ota_password"}, &dpsDcConverter};
-    #endif
-#else
-    SensorINA226 pvSensor{SensorConfig::PV_SENSOR_DEVICE_ADDRESS, SensorConfig::SensorINA226::PV_SHUNT_mOhm};
-    SensorINA226 batterySensor{SensorConfig::BATTERY_SENSOR_DEVICE_ADDRESS, SensorConfig::SensorINA226::BATTERY_SHUNT_mOhm};
-    PwmDcConverter pwmActuator{PWM_PIN};
-    ChargeController controller{&pvSensor, &batterySensor, &pwmActuator, &profileSelector};
-    #ifdef MQTT_CLIENT
-    OtaHandler otaHandler{{.hostname = DEVICE_ID, .password = "ota_password"}, &pwmActuator};
-    #endif
+ChargeController controller{
+    &Initializer::getInstance().getPvMeasurements(),
+    &Initializer::getInstance().getBatteryMeasurements(),
+    &Initializer::getInstance().getActuator(),
+    &profileSelector};
+#ifdef MQTT_CLIENT
+OtaHandler otaHandler{{.hostname = DEVICE_ID, .password = "ota_password"}, &Initializer::getInstance().getActuator()};
 #endif
 
 void setup() 
@@ -78,7 +58,6 @@ void setup()
     esp_log_level_set("*", ESP_LOG_DEBUG);
     #endif
 
-    Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
     ESP_LOGI(TAG, "setup() start");
 
     #ifdef MQTT_CLIENT
@@ -92,15 +71,8 @@ void setup()
     ESP_LOGI(TAG, "bridge.init() done");
     #endif
 
-    #ifdef DPS_DC_CONVERTER
-    Serial2.begin(9600, SERIAL_8N1, SERIAL2_RX_PIN, SERIAL2_TX_PIN);
-    dpsDcConverter.init();
-    ESP_LOGI(TAG, "dpsDcConverter.init() done");
-    #else
-    pvSensor.init();
-    batterySensor.init();
-    pwmActuator.init();
-    #endif
+    Initializer::getInstance().init();
+    ESP_LOGI(TAG, "hardware.init() done");
 
     controller.init();
     ESP_LOGI(TAG, "controller.init() done");
@@ -120,13 +92,7 @@ void loop()
     #endif
 
     // Update sensors and controller first so telemetry always reads fresh values
-    #ifdef DPS_DC_CONVERTER
-    dpsDcConverter.update();
-    #else
-    pvSensor.update();
-    batterySensor.update();
-    pwmActuator.update();
-    #endif
+    Initializer::getInstance().update();
 
     controller.update();
 
@@ -136,11 +102,11 @@ void loop()
     if (!telemetryTimer.active() || telemetryTimer.getDuration() >= 5000)
     {
         telemetryTimer.trigger();
-        #ifdef DPS_DC_CONVERTER
-        bridge.publishTelemetry(pvMeasurements, batteryMeasurements, controller.getBatteryMode(), controller.getMpptControl());
-        #else
-        bridge.publishTelemetry(pvSensor, batterySensor, controller.getBatteryMode(), controller.getMpptControl());
-        #endif
+        bridge.publishTelemetry(
+            Initializer::getInstance().getPvMeasurements(),
+            Initializer::getInstance().getBatteryMeasurements(),
+            controller.getBatteryMode(),
+            controller.getMpptControl());
     }
     #endif
 

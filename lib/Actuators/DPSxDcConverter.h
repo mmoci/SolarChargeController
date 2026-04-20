@@ -8,11 +8,14 @@
 namespace DPSxDcConverterConfig
 {
     static constexpr ActuatorIf::ControlMode CONTROL_MODE {ActuatorIf::ControlMode::VOLTAGE_SETPOINT};
-    // DPS5005 Modbus registers use 0.01V per bit and 0.01A per bit.
+    // DPS5005 Modbus register resolution:
+    //   U_SET / UOUT / UIN : 0.01V/bit   → register 5000 = 50.00V
+    //   I_SET              : 0.001A/bit  → register 5000 = 5.000A  (write setpoint)
+    //   IOUT               : 0.01A/bit   → register  500 = 5.00A   (read display value)
     // MAX values represent the register value written at 100% control output.
-    // DPS5005 hardware max: 50.00V → register 5000 | 5.00A → register 500
-    static constexpr int MAX_MPPT_VOLTAGE_CONTROL_VALUE   {5000}; // 50.00 V in 0.01V/bit units
-    static constexpr int MAX_MPPT_CURRENT_CONTROL_VALUE   {500};  //  5.00 A in 0.01A/bit units
+    static constexpr int MAX_MPPT_VOLTAGE_CONTROL_VALUE   {5000}; // 50.00V in 0.01V/bit units
+    static constexpr int MAX_MPPT_CURRENT_CONTROL_VALUE   {5000}; // 5.000A in 0.001A/bit units
+    static constexpr int MAX_SOFT_STEP                    {1};    // Conservative: Modbus RTU ~50-100ms per cycle → slow response, so we limit soft step to prevent overshooting. May need tuning based on system response and stability.
 
     constexpr int selectControlValueFromControlMode()
     {
@@ -29,6 +32,13 @@ namespace DPSxDcConverterConfig
 
     static constexpr int MAX_MPPT_CONTROL_VALUE     {selectControlValueFromControlMode()};
     static constexpr int DEFAULT_MPPT_CONTROL_VALUE {MAX_MPPT_CONTROL_VALUE / 2};
+
+    // DPS5005 factory default Modbus slave address = 1 (configurable on the device menu).
+    static constexpr uint8_t  SLAVE_ADDRESS              {0x01};
+    static constexpr uint16_t MESSAGE_TMO                {100};   // ms — time to wait for a Modbus response
+    static constexpr uint8_t  MAX_READS_BEFORE_WRITE     {3};     // read cycles between write cycles
+    static constexpr uint16_t ERROR_RECOVERY_TMO         {10000}; // ms — pause duration after too many errors
+    static constexpr uint8_t  CONSECUTIVE_ERRORS_THRESHOLD {5};   // errors before triggering recovery pause
 }
 
 /**
@@ -50,6 +60,7 @@ class DPSxDcConverter : public Device, public ActuatorIf
     int getMinControl() const override;
     int getMaxControl() const override;
     bool hasMeasurements() const override;
+    int  getMaxSoftStep()  const override { return DPSxDcConverterConfig::MAX_SOFT_STEP; }
     void applyControl(int controlValue) override;
     
     int getInVoltage_mV() const {return m_inVoltage_mV;}
@@ -60,16 +71,17 @@ class DPSxDcConverter : public Device, public ActuatorIf
     private:
     enum class Register : uint16_t
     {
-        // DPS5005 Modbus RTU register map (0.01V per bit / 0.01A per bit)
-        U_SET   = 0x0000, ///< Voltage setpoint
-        I_SET   = 0x0001, ///< Current setpoint
-        UOUT    = 0x0002, ///< Output voltage (read)
-        IOUT    = 0x0003, ///< Output current (read)
-        POWER   = 0x0004, ///< Output power   (read, 0.01W/bit)
-        UIN     = 0x0005, ///< Input voltage   (read)
-        LOCK    = 0x0006, ///< Key-lock: 0=off 1=on
-        PROTECT = 0x0007, ///< Protection flags (OVP/OCP/OPP/OTP)
-        ON_OFF  = 0x0008  ///< Output enable: 1=on 0=off
+        // DPS5005 Modbus RTU register map
+        U_SET   = 0x0000, ///< Voltage setpoint         (R/W, 0.01V/bit,  e.g. 2400 = 24.00V)
+        I_SET   = 0x0001, ///< Current setpoint         (R/W, 0.001A/bit, e.g. 5000 = 5.000A)
+        UOUT    = 0x0002, ///< Output voltage           (R,   0.01V/bit)
+        IOUT    = 0x0003, ///< Output current           (R,   0.01A/bit)
+        POWER   = 0x0004, ///< Output power             (R,   0.1W/bit)
+        UIN     = 0x0005, ///< Input voltage            (R,   0.01V/bit)
+        LOCK    = 0x0006, ///< Key-lock: 0=off 1=on     (R/W)
+        PROTECT = 0x0007, ///< Protection flags: 0=OK 1=OVP 2=OCP 3=OPP (R)
+        CV_CC   = 0x0008, ///< CV/CC status: 0=CV 1=CC  (R, read-only — NOT the output switch)
+        ON_OFF  = 0x0009  ///< Output enable: 0=off 1=on (R/W)
     };
 
     enum class Function : uint8_t
@@ -93,16 +105,10 @@ class DPSxDcConverter : public Device, public ActuatorIf
     };
 
     // ===== Configuration =====
-    // DPS5005 factory default Modbus slave address = 1 (configurable on the device menu).
-    static constexpr uint8_t  SLAVE_ADDRESS {0x01};
-    static constexpr uint16_t CRC16_DEFAULT_VALUE {0xFFFF};
+    static constexpr uint16_t CRC16_DEFAULT_VALUE    {0xFFFF};
     static constexpr uint16_t CRC16_POLYNOMIAL_VALUE {0xA001};
-    static constexpr uint16_t FRAME_SIZE {8}; // bytes
-    static constexpr uint16_t MESSAGE_TMO {100}; // milliseconds
+    static constexpr uint16_t FRAME_SIZE             {8}; // bytes — fixed by Modbus RTU spec
     static constexpr uint8_t  NUM_OF_REGISTERS_TO_READ {4};
-    static constexpr uint8_t  MAX_READS_BEFORE_WRITE {3};
-    static constexpr uint16_t ERROR_RECOVERY_TMO {10000}; // milliseconds
-    static constexpr uint8_t  CONSECUTIVE_ERRORS_THRESHOLD {5};
 
     // ===== State Variables =====
     ControlMode m_controlMode{DPSxDcConverterConfig::CONTROL_MODE};
@@ -143,7 +149,7 @@ class DPSxDcConverter : public Device, public ActuatorIf
      * @param slaveAddress 
      * @return std::size_t 
      */
-    std::size_t sendRegisterReadReq(Register startAddress, uint16_t nrOfRegisters, uint8_t slaveAddress = SLAVE_ADDRESS);
+    std::size_t sendRegisterReadReq(Register startAddress, uint16_t nrOfRegisters, uint8_t slaveAddress = DPSxDcConverterConfig::SLAVE_ADDRESS);
 
     /**
      * @brief Message format:
@@ -153,7 +159,7 @@ class DPSxDcConverter : public Device, public ActuatorIf
      * @param nrOfRegisters 
      * @return std::vector<uint16_t> 
      */
-    std::vector<uint16_t> receiveRegisterReadRsp(uint16_t nrOfRegisters, uint8_t slaveAddress = SLAVE_ADDRESS);
+    std::vector<uint16_t> receiveRegisterReadRsp(uint16_t nrOfRegisters, uint8_t slaveAddress = DPSxDcConverterConfig::SLAVE_ADDRESS);
 
     /**
      * @brief Synchronous, blocking with timeout is the correct first design...
@@ -164,14 +170,14 @@ class DPSxDcConverter : public Device, public ActuatorIf
      * @param slaveAddress 
      * @return std::size_t 
      */
-    std::size_t sendRegisterWriteReq(Register address, uint16_t data, uint8_t slaveAddress = SLAVE_ADDRESS);
+    std::size_t sendRegisterWriteReq(Register address, uint16_t data, uint8_t slaveAddress = DPSxDcConverterConfig::SLAVE_ADDRESS);
 
     /**
      * @brief Message format:
      *        [slave] [0x06] [reg_hi][reg_lo] [value_hi][value_lo] [crc_lo][crc_hi]
      * 
      */
-    bool receiveRegisterWriteRsp(Register address, uint16_t data, uint8_t slaveAddress = SLAVE_ADDRESS);
+    bool receiveRegisterWriteRsp(Register address, uint16_t data, uint8_t slaveAddress = DPSxDcConverterConfig::SLAVE_ADDRESS);
 
      /**
      * @brief 
@@ -189,7 +195,7 @@ class DPSxDcConverter : public Device, public ActuatorIf
      *                     when writting it represents data written in register
      * @param slaveAddress Address of the slave device towards which request is send
      */
-    void createFrame(uint8_t* buffer, Register startAddress,  Function readWrite, uint16_t data, uint8_t slaveAddress = SLAVE_ADDRESS);
+    void createFrame(uint8_t* buffer, Register startAddress, Function readWrite, uint16_t data, uint8_t slaveAddress = DPSxDcConverterConfig::SLAVE_ADDRESS);
 
     /**
      * @brief Uses MODBUS CRC16 algorithm to compute CRC bytes and appends them at the end of buffer.

@@ -25,7 +25,7 @@ void DPSxDcConverter::update()
     if(m_pauseRetrying)
     {
         m_errorRecoveryTimer.update();
-        if(m_errorRecoveryTimer.getDuration() >= ERROR_RECOVERY_TMO)
+        if(m_errorRecoveryTimer.getDuration() >= DPSxDcConverterConfig::ERROR_RECOVERY_TMO)
         {
             ESP_LOGI(TAG, "Resuming communication after pause");
             m_pauseRetrying = false;
@@ -101,7 +101,7 @@ void DPSxDcConverter::handleModbusMessages()
             m_activeMessageType   = ModbusMessageType::WRITE;
             m_readsSinceLastWrite = 0;
         }
-        else if(m_writeMessagePending && m_readsSinceLastWrite >= MAX_READS_BEFORE_WRITE)
+        else if(m_writeMessagePending && m_readsSinceLastWrite >= DPSxDcConverterConfig::MAX_READS_BEFORE_WRITE)
         {
             m_activeWriteRegister = selectRegisterType();
             m_activeWriteData     = static_cast<uint16_t>(m_setPointValue);
@@ -149,10 +149,11 @@ void DPSxDcConverter::handleModbusMessages()
 
             if(m_activeMessageType == ModbusMessageType::READ)
             {
-                std::vector<uint16_t> buffer{receiveRegisterReadRsp(nrOfRegisters)};
+                std::vector<uint16_t> buffer = receiveRegisterReadRsp(nrOfRegisters);
                 if(!buffer.empty())
                 {
-                    // DPS registers are in 0.01V / 0.01A per bit → multiply by 10 to get mV / mA
+                    // UOUT/IOUT/UIN read registers: 0.01V/bit and 0.01A/bit → multiply by 10 to get mV / mA
+                    // (I_SET write register uses 0.001A/bit — different resolution, write-only)
                     m_outVoltage_mV = buffer[0] * 10;
                     m_outCurrent_mA = buffer[1] * 10;
                     m_inVoltage_mV  = buffer[3] * 10;
@@ -179,7 +180,7 @@ void DPSxDcConverter::handleModbusMessages()
                 }
             }
 
-            if(m_messageTimer.getDuration() >= MESSAGE_TMO)
+            if(m_messageTimer.getDuration() >= DPSxDcConverterConfig::MESSAGE_TMO)
             {
                 m_messageState = ModbusState::ERROR;
                 ++m_consecutiveErrors;
@@ -189,7 +190,7 @@ void DPSxDcConverter::handleModbusMessages()
         }
 
         case ModbusState::ERROR:
-        if(m_consecutiveErrors >= CONSECUTIVE_ERRORS_THRESHOLD)
+        if(m_consecutiveErrors >= DPSxDcConverterConfig::CONSECUTIVE_ERRORS_THRESHOLD)
         {
             ESP_LOGE(TAG, "Too many consecutive errors: %d. Pausing...", m_consecutiveErrors);
             m_pauseRetrying = true;

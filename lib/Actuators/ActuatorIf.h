@@ -18,6 +18,7 @@ public:
     virtual int getMinControl() const = 0;
     virtual int getMaxControl() const = 0;
     virtual bool hasMeasurements() const = 0;
-    
+    virtual int  getMaxSoftStep()  const = 0;
+
     virtual ~ActuatorIf() = default;
 };

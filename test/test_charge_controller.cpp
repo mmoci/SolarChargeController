@@ -137,7 +137,7 @@ TEST_F(ChargeControllerTest, ControlRampsSmootly)
     for(size_t i = 1; i < controlValues.size(); ++i)
     {
         int delta = std::abs(controlValues[i] - controlValues[i-1]);
-        EXPECT_LE(delta, ChargeControllerConfig::MAX_CONTROL_SOFT_STEP + 1);
+        EXPECT_LE(delta, actuator.getMaxSoftStep() + 1);
     }
 }
 

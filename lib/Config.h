@@ -31,11 +31,6 @@ namespace ChargeControllerConfig
     static constexpr double Ki {0.01};
     static constexpr long   MAX_INTEGRAL_ERROR {500};
     
-    #ifdef DPS_DC_CONVERTER
-        static constexpr int MAX_CONTROL_SOFT_STEP {1};  // Conservative for Modbus latency
-    #else
-        static constexpr int MAX_CONTROL_SOFT_STEP {5};  // Aggressive for PWM
-    #endif
 }
 
 namespace BatteryConfig

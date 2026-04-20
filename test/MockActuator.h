@@ -15,6 +15,7 @@ public:
     int getMinControl() const override { return 0; }
     int getMaxControl() const override { return 100; }
     bool hasMeasurements() const override { return true; }
+    int  getMaxSoftStep()  const override { return 5; }
 
     // Getters for testing
     int getLastControl() const { return m_lastControl; }
