@@ -6,6 +6,7 @@
 #include "OtaHandler.h"
 #include "Utility.h"
 #include "Logger.h"
+#include "secrets.h"
 
 static constexpr char TAG[] = "Main";
 
@@ -17,13 +18,13 @@ static constexpr std::string_view DEVICE_ID {"solar_controller_1"};
 static const std::string AVAILABILITY_TOPIC {"solar/" + std::string{DEVICE_ID} + "/availability"};
 
 MqttClient::Config mqttConfig{
-    .broker        = "192.168.1.2",
+    .broker        = MQTT_BROKER,
     .port          = 1883,
     .clientId      = DEVICE_ID,
-    .username      = "moci_mqtt",
-    .password      = "Mm21101981",
-    .wifiSsid      = "Net_2110",
-    .wifiPassword  = "MM2110981340709!",
+    .username      = MQTT_USERNAME,
+    .password      = MQTT_PASSWORD,
+    .wifiSsid      = WIFI_SSID,
+    .wifiPassword  = WIFI_PASSWORD,
     .willTopic     = AVAILABILITY_TOPIC,
     .willPayload   = "offline",
     .onlinePayload = "online",
@@ -47,7 +48,7 @@ ChargeController controller{
     &Initializer::getInstance().getActuator(),
     &profileSelector};
 #ifdef MQTT_CLIENT
-OtaHandler otaHandler{{.hostname = DEVICE_ID, .password = "ota_password"}, &Initializer::getInstance().getActuator()};
+OtaHandler otaHandler{{.hostname = DEVICE_ID, .password = OTA_PASSWORD}, &Initializer::getInstance().getActuator()};
 #endif
 
 void setup() 
