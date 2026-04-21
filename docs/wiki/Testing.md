@@ -39,6 +39,8 @@ build_flags =
     -Ilib/MpptController
     -Ilib/Actuators
     -Ilib/Logger
+    -Ilib/Measurements
+    -Ilib/Sensors
     -Itest
     -std=c++17
 test_ignore = src/*
