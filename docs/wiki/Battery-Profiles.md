@@ -39,7 +39,7 @@ All voltages are in **millivolts (mV)**, all currents in **milliamps (mA)**.
 | `LIFEPO4_4S` | LiFePO₄, 4 cells in series | 14 000 mV (3.50 V × 4) |
 | `CUSTOM` | User-defined; starts from 4S Li-Ion defaults | configurable |
 
-Full default values for each type are documented in [Configuration](Configuration.md#libconfigh----built-in-battery-profiles).
+Full default values for each type are documented in [Configuration](Configuration.md#libconfigh--built-in-battery-profiles).
 
 ---
 
