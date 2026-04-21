@@ -135,7 +135,7 @@ MqttSolarControllerBridge::onBatteryTypeSet()
     │       ├── load LIFEPO4_4S defaults
     │       ├── validate
     │       └── save to NVS
-    └── esp_restart()   ← device reboots with new profile
+    └── bridge publishes updated state topics (retained)
 ```
 
 ---
