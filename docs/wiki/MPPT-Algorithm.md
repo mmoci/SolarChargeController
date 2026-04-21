@@ -116,7 +116,7 @@ Identical structure to the current clamp, but uses `batteryVoltageMeasured` and 
 | `Ki` | 0.01 |
 | `MAX_INTEGRAL_ERROR` | 500 |
 
-See [Configuration](Configuration.md#libconfigh----charge-controller-configuration) for tuning guidance.
+See [Configuration](Configuration.md#libconfigh--charge-controller-configuration) for tuning guidance.
 
 ---
 
