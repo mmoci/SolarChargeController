@@ -105,8 +105,9 @@ public:
      * @param battMeas        Battery voltage and current measurements.
      * @param mode            Current battery charging mode.
      * @param mpptControl_pct MPPT control signal in percent (0–100).
+     * @param duration_ms     Minimum interval in ms between consecutive publishes.
      */
-    void publishTelemetry(const MeasurementsIf& pvMeas, const MeasurementsIf& battMeas, BatteryManager::Mode  mode, int mpptControl_pct);
+    void publishTelemetry(const MeasurementsIf& pvMeas, const MeasurementsIf& battMeas, BatteryManager::Mode  mode, int mpptControl_pct, unsigned long duration_ms = TELEMETRY_PUBLISH_INTERVAL_MS);
 
 private:
     // Called from onConnect — publishes all HA discovery config payloads (retained)
@@ -125,6 +126,8 @@ private:
     // Helper: handles boilerplate for integer-valued commands
     void handleIntCommand(std::string_view name, std::string_view payload, std::function<BatteryProfileSelector::Result(int)> setter);
 
+    static constexpr unsigned long TELEMETRY_PUBLISH_INTERVAL_MS = 5000; // Publish telemetry at most every 5 seconds to prevent flooding the broker and HA
+
     static std::string_view                          batteryModeToString(BatteryManager::Mode mode);
     static std::string_view                          batteryTypeToString(BatteryConfig::BatteryType type);
     static std::optional<BatteryConfig::BatteryType> stringToBatteryType(std::string_view str);
@@ -132,4 +135,5 @@ private:
     MqttClient&                     m_mqttClient;
     BatteryProfileSelector&         m_profileSelector;
     MqttSolarControllerTopicBuilder m_topics;
+    Timer                           m_telemetryDurationTimer{};
 };

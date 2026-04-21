@@ -36,23 +36,30 @@ void MqttSolarControllerBridge::init()
     });
 }
 
-void MqttSolarControllerBridge::publishTelemetry(const MeasurementsIf& pvMeas, const MeasurementsIf& battMeas, BatteryManager::Mode  mode, int mpptControl_pct)
+void MqttSolarControllerBridge::publishTelemetry(const MeasurementsIf& pvMeas, const MeasurementsIf& battMeas, BatteryManager::Mode  mode, int mpptControl_pct, unsigned long duration_ms)
 {
-    int pvPower_mW = (pvMeas.getVoltage_mV() * pvMeas.getCurrent_mA()) / 1000;
-    int battPower_mW = (battMeas.getVoltage_mV() * battMeas.getCurrent_mA()) / 1000;
-    int efficiency_pct = (pvPower_mW > 0) ? (battPower_mW * 100) / pvPower_mW : 0;
+    m_telemetryDurationTimer.update();
 
-    // High-frequency sensor readings — no retain, fresh value supersedes stale
-    m_mqttClient.publish(m_topics.pvVoltage(), floatToString(pvMeas.getVoltage_mV() / 1000.0, 3));        // Convert mV to V for more human-friendly telemetry
-    m_mqttClient.publish(m_topics.pvCurrent(), floatToString(pvMeas.getCurrent_mA() / 1000.0, 3));        // Convert mA to A for more human-friendly telemetry
-    m_mqttClient.publish(m_topics.pvPower(), floatToString(pvPower_mW / 1000.0, 3));                      // Convert mW to W for more human-friendly telemetry
-    m_mqttClient.publish(m_topics.batteryVoltage(), floatToString(battMeas.getVoltage_mV() / 1000.0, 3)); // Convert mV to V for more human-friendly telemetry
-    m_mqttClient.publish(m_topics.batteryCurrent(), floatToString(battMeas.getCurrent_mA() / 1000.0, 3)); // Convert mA to A for more human-friendly telemetry
+    if(!m_telemetryDurationTimer.active() || m_telemetryDurationTimer.getDuration() >= duration_ms)
+    {
+        m_telemetryDurationTimer.trigger();
 
-    // State topics — retain so HA shows last known value after reconnect
-    m_mqttClient.publish(m_topics.chargingMode(), batteryModeToString(mode), /*retain=*/true);
-    m_mqttClient.publish(m_topics.controlSignalPct(), std::to_string(mpptControl_pct), /*retain=*/true);
-    m_mqttClient.publish(m_topics.efficiencyPct(), std::to_string(efficiency_pct), /*retain=*/true);
+        int pvPower_mW = (pvMeas.getVoltage_mV() * pvMeas.getCurrent_mA()) / 1000;
+        int battPower_mW = (battMeas.getVoltage_mV() * battMeas.getCurrent_mA()) / 1000;
+        int efficiency_pct = (pvPower_mW > 0) ? (battPower_mW * 100) / pvPower_mW : 0;
+
+        // High-frequency sensor readings — no retain, fresh value supersedes stale
+        m_mqttClient.publish(m_topics.pvVoltage(), floatToString(pvMeas.getVoltage_mV() / 1000.0, 3));        // Convert mV to V for more human-friendly telemetry
+        m_mqttClient.publish(m_topics.pvCurrent(), floatToString(pvMeas.getCurrent_mA() / 1000.0, 3));        // Convert mA to A for more human-friendly telemetry
+        m_mqttClient.publish(m_topics.pvPower(), floatToString(pvPower_mW / 1000.0, 3));                      // Convert mW to W for more human-friendly telemetry
+        m_mqttClient.publish(m_topics.batteryVoltage(), floatToString(battMeas.getVoltage_mV() / 1000.0, 3)); // Convert mV to V for more human-friendly telemetry
+        m_mqttClient.publish(m_topics.batteryCurrent(), floatToString(battMeas.getCurrent_mA() / 1000.0, 3)); // Convert mA to A for more human-friendly telemetry
+
+        // State topics — retain so HA shows last known value after reconnect
+        m_mqttClient.publish(m_topics.chargingMode(), batteryModeToString(mode), /*retain=*/true);
+        m_mqttClient.publish(m_topics.controlSignalPct(), std::to_string(mpptControl_pct), /*retain=*/true);
+        m_mqttClient.publish(m_topics.efficiencyPct(), std::to_string(efficiency_pct), /*retain=*/true);
+    }
 }
 
 // ---------------------------------------------------------------------------

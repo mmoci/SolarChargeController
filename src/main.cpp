@@ -98,17 +98,11 @@ void loop()
     controller.update();
 
     #ifdef MQTT_CLIENT
-    static Timer telemetryTimer{};
-    telemetryTimer.update();
-    if (!telemetryTimer.active() || telemetryTimer.getDuration() >= 5000)
-    {
-        telemetryTimer.trigger();
-        bridge.publishTelemetry(
+    bridge.publishTelemetry(
             Initializer::getInstance().getPvMeasurements(),
             Initializer::getInstance().getBatteryMeasurements(),
             controller.getBatteryMode(),
             controller.getMpptControl());
-    }
     #endif
 
     delay(3);
