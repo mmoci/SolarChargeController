@@ -139,7 +139,7 @@ solar/{deviceId}/profile/max_charging_current/set  → integer in mA
 ## Changing the Profile Programmatically
 
 ```cpp
-// Select a different type (restarts device)
+// Select a different type
 profileSelector.setProfileType(BatteryConfig::BatteryType::LIFEPO4_4S);
 
 // Override a single field (hot-reload, no restart)
