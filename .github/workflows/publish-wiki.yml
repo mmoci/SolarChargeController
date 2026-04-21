@@ -19,8 +19,8 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git clone "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/mmoci/SolarChargeController.wiki.git" wiki-repo
-          cp docs/wiki/*.md wiki-repo/
+          git clone "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.wiki.git" wiki-repo
+          find docs/wiki -maxdepth 1 -name '*.md' -exec cp {} wiki-repo/ \;
           cd wiki-repo
           git add .
           git diff --cached --quiet || (git commit -m "docs: sync wiki from docs/wiki/" && git push)
