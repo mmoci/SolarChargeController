@@ -67,7 +67,7 @@ pio run -e esp32dev-ota -t upload
 | Symptom | Cause | Fix |
 |---|---|---|
 | Device not visible in IDE / PlatformIO | mDNS not working on your network | Use the static IP address directly instead of `.local` |
-| "Wrong password" error | `OTA_PASSWORD` mismatch | Check `secrets.h` and the upload config match |
+| "Wrong password" error | `OTA_PASSWORD` mismatch | Check `include/Secrets.h` and the upload config match |
 | OTA starts but fails mid-flash | Large binary / WiFi interference | Try a wired Ethernet adapter or move ESP32 closer to the router |
 | Device restarts but boots old firmware | Partition table issue | Erase flash fully and re-flash via USB |
 
