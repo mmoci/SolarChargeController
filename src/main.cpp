@@ -6,7 +6,7 @@
 #include "OtaHandler.h"
 #include "Utility.h"
 #include "Logger.h"
-#include "secrets.h"
+#include "Secrets.h"
 
 static constexpr char TAG[] = "Main";
 

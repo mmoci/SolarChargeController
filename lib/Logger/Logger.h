@@ -42,10 +42,22 @@
     #ifdef ESP_LOGD
         #undef ESP_LOGD
     #endif
-    #define ESP_LOGE(tag, fmt, ...) esp_log_write(ESP_LOG_ERROR, tag, "[ERROR] (%lu) %s: " fmt "\n", (unsigned long)esp_log_timestamp(), tag, ##__VA_ARGS__)
-    #define ESP_LOGI(tag, fmt, ...) esp_log_write(ESP_LOG_INFO,  tag, "[INFO] (%lu) %s: " fmt "\n", (unsigned long)esp_log_timestamp(), tag, ##__VA_ARGS__)
-    #define ESP_LOGW(tag, fmt, ...) esp_log_write(ESP_LOG_WARN,  tag, "[WARNING] (%lu) %s: " fmt "\n", (unsigned long)esp_log_timestamp(), tag, ##__VA_ARGS__)
-    #define ESP_LOGD(tag, fmt, ...) esp_log_write(ESP_LOG_DEBUG, tag, "[DEBUG] (%lu) %s: " fmt "\n", (unsigned long)esp_log_timestamp(), tag, ##__VA_ARGS__)
+
+    // Format raw milliseconds as HH:MM:SS.mmm for readability
+    inline const char* _log_fmt_time(char* buf, unsigned long ms) 
+    {
+        unsigned long s   = ms / 1000;
+        unsigned long m   = s  / 60;
+        unsigned long h   = m  / 60;
+        snprintf(buf, 16, "%02lu:%02lu:%02lu.%03lu", h, m % 60, s % 60, ms % 1000);
+        return buf;
+    }
+    #define _LOG_TS() ([]() -> const char* { static char _b[16]; return _log_fmt_time(_b, (unsigned long)esp_log_timestamp()); }())
+
+    #define ESP_LOGE(tag, fmt, ...) esp_log_write(ESP_LOG_ERROR, tag, "[ERROR] [%s] %s: " fmt "\n", _LOG_TS(), tag, ##__VA_ARGS__)
+    #define ESP_LOGI(tag, fmt, ...) esp_log_write(ESP_LOG_INFO,  tag, "[INFO]  [%s] %s: " fmt "\n", _LOG_TS(), tag, ##__VA_ARGS__)
+    #define ESP_LOGW(tag, fmt, ...) esp_log_write(ESP_LOG_WARN,  tag, "[WARN]  [%s] %s: " fmt "\n", _LOG_TS(), tag, ##__VA_ARGS__)
+    #define ESP_LOGD(tag, fmt, ...) esp_log_write(ESP_LOG_DEBUG, tag, "[DEBUG] [%s] %s: " fmt "\n", _LOG_TS(), tag, ##__VA_ARGS__)
 
 #elif defined(ARDUINO)
     // Generic Arduino: Serial output, DEBUG suppressed
