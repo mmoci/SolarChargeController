@@ -123,9 +123,9 @@ Same defaults as `LI_ION_4S_DEFAULT`. Use this type when you want full control o
 
 ---
 
-## `include/secrets.h` — Runtime Credentials
+## `include/Secrets.h` — Runtime Credentials
 
-Never committed to source control. Copy `include/secrets.h.template`:
+Never committed to source control. Copy `include/Secrets.h.template`:
 
 ```cpp
 #define MQTT_BROKER    "192.168.1.10"
