@@ -8,7 +8,7 @@ MQTT support is enabled by the `-D MQTT_CLIENT` build flag. When enabled, the de
 
 - MQTT broker (e.g. [Mosquitto](https://mosquitto.org/), or the built-in HA MQTT broker add-on)
 - Home Assistant with the MQTT integration enabled
-- WiFi credentials and broker address in `include/secrets.h`
+- WiFi credentials and broker address in `include/Secrets.h`
 
 ---
 
