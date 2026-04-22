@@ -6,7 +6,10 @@
 class DPSxMeasurements : public MeasurementsIf
 {
     public:
-    static constexpr uint32_t MEASUREMENT_STALE_TIMEOUT_MS {500};  // 500ms without update = stale
+    // DPS Modbus cycle is ~450ms per message. When a write is pending, up to
+    // MAX_READS_BEFORE_WRITE+1 cycles pass without a READ (= ~1.8s gap).
+    // The stale timeout must exceed the worst-case gap between reads.
+    static constexpr uint32_t MEASUREMENT_STALE_TIMEOUT_MS {2000}; // 2s — covers up to 4 Modbus cycles without a READ
 
     enum class MeasurementSource
     {

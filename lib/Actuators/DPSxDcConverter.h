@@ -11,7 +11,7 @@ namespace DPSxDcConverterConfig
     // DPS5005 Modbus register resolution:
     //   U_SET / UOUT / UIN : 0.01V/bit   → register 5000 = 50.00V
     //   I_SET              : 0.001A/bit  → register 5000 = 5.000A  (write setpoint)
-    //   IOUT               : 0.01A/bit   → register  500 = 5.00A   (read display value)
+    //   IOUT               : 0.001A/bit  → register 5000 = 5.000A  (read display value)
     // MAX values represent the register value written at 100% control output.
     static constexpr int MAX_MPPT_VOLTAGE_CONTROL_VALUE   {5000}; // 50.00V in 0.01V/bit units
     static constexpr int MAX_MPPT_CURRENT_CONTROL_VALUE   {5000}; // 5.000A in 0.001A/bit units
@@ -35,8 +35,12 @@ namespace DPSxDcConverterConfig
 
     // DPS5005 factory default Modbus slave address = 1 (configurable on the device menu).
     static constexpr uint8_t  SLAVE_ADDRESS              {0x01};
-    static constexpr uint16_t MESSAGE_TMO                {100};   // ms — time to wait for a Modbus response
+    static constexpr uint16_t MESSAGE_TMO                {700};   // ms — DPS5005 observed response time ~450ms; 700ms gives comfortable margin
     static constexpr uint8_t  MAX_READS_BEFORE_WRITE     {3};     // read cycles between write cycles
+    // When output is enabled, U_SET must always exceed the battery terminal voltage or DPS
+    // cannot push current into the battery (Iout→0, MPPT sees P=0, system oscillates).
+    // This headroom (in 0.01V/bit register units) ensures a minimum margin above Uout.
+    static constexpr int VOLTAGE_HEADROOM_BITS           {50};    // 50 × 0.01V/bit = 0.50V above battery voltage
     static constexpr uint16_t ERROR_RECOVERY_TMO         {10000}; // ms — pause duration after too many errors
     static constexpr uint8_t  CONSECUTIVE_ERRORS_THRESHOLD {5};   // errors before triggering recovery pause
 }
@@ -75,7 +79,7 @@ class DPSxDcConverter : public Device, public ActuatorIf
         U_SET   = 0x0000, ///< Voltage setpoint         (R/W, 0.01V/bit,  e.g. 2400 = 24.00V)
         I_SET   = 0x0001, ///< Current setpoint         (R/W, 0.001A/bit, e.g. 5000 = 5.000A)
         UOUT    = 0x0002, ///< Output voltage           (R,   0.01V/bit)
-        IOUT    = 0x0003, ///< Output current           (R,   0.01A/bit)
+        IOUT    = 0x0003, ///< Output current           (R,   0.001A/bit)
         POWER   = 0x0004, ///< Output power             (R,   0.1W/bit)
         UIN     = 0x0005, ///< Input voltage            (R,   0.01V/bit)
         LOCK    = 0x0006, ///< Key-lock: 0=off 1=on     (R/W)

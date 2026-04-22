@@ -40,7 +40,16 @@ void DPSxDcConverter::update()
 void DPSxDcConverter::applyControl(int controlValue) 
 {
     auto setPointValue{static_cast<int>(std::round(controlValue * getMaxControl() / 100.0))};
-    
+
+    // Floor: when output is enabled, never set U_SET below battery terminal voltage.
+    // If U_SET < Uout the DPS cannot push current into the battery, Iout drops to 0,
+    // pvPower = Uin×Iout = 0, the PV-unavailable timer fires and the system oscillates.
+    if (controlValue > 0 && m_outVoltage_mV > 0)
+    {
+        const int battFloor = m_outVoltage_mV / 10 + DPSxDcConverterConfig::VOLTAGE_HEADROOM_BITS;
+        setPointValue = std::max(setPointValue, battFloor);
+    }
+
     if(m_setPointValue != setPointValue)
     {
         m_setPointValue = setPointValue;
@@ -85,14 +94,16 @@ void DPSxDcConverter::handleModbusMessages()
     switch(m_messageState)
     {
         case ModbusState::IDLE:
-        if (m_onOffPending)
+        // Priority 1: Disable output immediately — safety, never defer
+        if (m_onOffPending && !m_outputEnabled)
         {
             m_activeWriteRegister = Register::ON_OFF;
-            m_activeWriteData     = m_outputEnabled ? 1 : 0;
+            m_activeWriteData     = 0;
             m_onOffPending        = false;
             m_activeMessageType   = ModbusMessageType::WRITE;
             m_readsSinceLastWrite = 0;
         }
+        // Priority 2: I_SET OCP ceiling — one-time init on startup
         else if (m_iSetInitPending)
         {
             m_activeWriteRegister = Register::I_SET;
@@ -101,10 +112,21 @@ void DPSxDcConverter::handleModbusMessages()
             m_activeMessageType   = ModbusMessageType::WRITE;
             m_readsSinceLastWrite = 0;
         }
+        // Priority 3: U_SET / I_SET setpoint — must be applied BEFORE enabling output
+        // so the DPS never turns on with a stale or zero setpoint.
         else if(m_writeMessagePending && m_readsSinceLastWrite >= DPSxDcConverterConfig::MAX_READS_BEFORE_WRITE)
         {
             m_activeWriteRegister = selectRegisterType();
             m_activeWriteData     = static_cast<uint16_t>(m_setPointValue);
+            m_activeMessageType   = ModbusMessageType::WRITE;
+            m_readsSinceLastWrite = 0;
+        }
+        // Priority 4: Enable output — only after correct setpoint has been written
+        else if (m_onOffPending && m_outputEnabled)
+        {
+            m_activeWriteRegister = Register::ON_OFF;
+            m_activeWriteData     = 1;
+            m_onOffPending        = false;
             m_activeMessageType   = ModbusMessageType::WRITE;
             m_readsSinceLastWrite = 0;
         }
@@ -155,7 +177,7 @@ void DPSxDcConverter::handleModbusMessages()
                     // UOUT/IOUT/UIN read registers: 0.01V/bit and 0.01A/bit → multiply by 10 to get mV / mA
                     // (I_SET write register uses 0.001A/bit — different resolution, write-only)
                     m_outVoltage_mV = buffer[0] * 10;
-                    m_outCurrent_mA = buffer[1] * 10;
+                    m_outCurrent_mA = buffer[1];     // IOUT: 0.001A/bit → 1 bit = 1mA
                     m_inVoltage_mV  = buffer[3] * 10;
 
                     m_consecutiveErrors = 0; // Reset error count on successful read
@@ -172,7 +194,10 @@ void DPSxDcConverter::handleModbusMessages()
                 {
                     m_writeMessagePending = false;
                     m_consecutiveErrors = 0; // Reset error count on successful write
-                    m_lastUpdateTime = millis(); // Update last successful write time
+                    // Do NOT update m_lastUpdateTime here — writes don't produce measurement data.
+                    // hasMeasurements() must stay false until the first successful READ so that
+                    // isMeasurementValid() doesn't return true with Vbatt=0, which would trip
+                    // BatteryManager into Fault before any real voltage has been observed.
                     ESP_LOGD(TAG, "Write OK \u2014 reg=0x%02X val=%d", static_cast<int>(m_activeWriteRegister), m_activeWriteData);
                     m_messageState = ModbusState::IDLE;
                     m_messageTimer.reset();
@@ -190,6 +215,7 @@ void DPSxDcConverter::handleModbusMessages()
         }
 
         case ModbusState::ERROR:
+        clearRxLine(); // Flush any late-arriving stale response before next request
         if(m_consecutiveErrors >= DPSxDcConverterConfig::CONSECUTIVE_ERRORS_THRESHOLD)
         {
             ESP_LOGE(TAG, "Too many consecutive errors: %d. Pausing...", m_consecutiveErrors);
