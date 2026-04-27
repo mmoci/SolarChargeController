@@ -7,14 +7,19 @@
 
 namespace DPSxDcConverterConfig
 {
-    static constexpr ActuatorIf::ControlMode CONTROL_MODE {ActuatorIf::ControlMode::VOLTAGE_SETPOINT};
+    // CURRENT_SETPOINT: I_SET is the MPPT control variable. Increasing I_SET draws more
+    // current from the PV source, causing Vin to drop along the panel I-V curve. P&O tracks
+    // Vin×Iout and adjusts I_SET to find the MPP. This is the physically correct variable for
+    // a CC/CV supply like the DPS5005: U_SET in voltage mode is always overridden by the battery
+    // when U_SET >> Vbatt, giving MPPT no effective leverage over the operating point.
+    static constexpr ActuatorIf::ControlMode CONTROL_MODE {ActuatorIf::ControlMode::CURRENT_SETPOINT};
     // DPS5005 Modbus register resolution:
     //   U_SET / UOUT / UIN : 0.01V/bit   → register 5000 = 50.00V
     //   I_SET              : 0.001A/bit  → register 5000 = 5.000A  (write setpoint)
     //   IOUT               : 0.001A/bit  → register 5000 = 5.000A  (read display value)
     // MAX values represent the register value written at 100% control output.
     static constexpr int MAX_MPPT_VOLTAGE_CONTROL_VALUE   {5000}; // 50.00V in 0.01V/bit units
-    static constexpr int MAX_MPPT_CURRENT_CONTROL_VALUE   {5000}; // 5.000A in 0.001A/bit units
+    static constexpr int MAX_MPPT_CURRENT_CONTROL_VALUE   {3000}; // 3.000A — limited for PSU bench testing (PSU CC limit); restore to 5000 for real panel
     static constexpr int MAX_SOFT_STEP                    {1};    // Conservative: Modbus RTU ~50-100ms per cycle → slow response, so we limit soft step to prevent overshooting. May need tuning based on system response and stability.
 
     constexpr int selectControlValueFromControlMode()
@@ -36,11 +41,27 @@ namespace DPSxDcConverterConfig
     // DPS5005 factory default Modbus slave address = 1 (configurable on the device menu).
     static constexpr uint8_t  SLAVE_ADDRESS              {0x01};
     static constexpr uint16_t MESSAGE_TMO                {700};   // ms — DPS5005 observed response time ~450ms; 700ms gives comfortable margin
-    static constexpr uint8_t  MAX_READS_BEFORE_WRITE     {3};     // read cycles between write cycles
+    static constexpr uint8_t  MAX_READS_BEFORE_WRITE     {2};     // reads between write cycles.
+    // The DPS takes ~1 full read cycle (~450ms) to reflect a new I_SET in the IOUT register.
+    // With value=1 the single read after each write is always stale → P&O computes false
+    // gradients and oscillates. With value=2 the first read is skipped (stale) and the
+    // second provides a settled measurement. areMeasurementsSettled() enforces this gate.
+    static constexpr uint8_t  SETTLE_READS_AFTER_WRITE   {2};     // reads required before measurements are considered settled
+    // Delay before the first Modbus message after init(). The ESP32 UART TX pin
+    // can glitch during boot, corrupting any partial frame the DPS was processing
+    // from a previous session. This delay lets the DPS's frame-timeout expire so
+    // it returns to an idle state before we start talking.
+    static constexpr uint16_t STARTUP_DELAY_MS           {1000};  // ms — 1s > DPS frame timeout (~100ms at 9600 baud)
     // When output is enabled, U_SET must always exceed the battery terminal voltage or DPS
     // cannot push current into the battery (Iout→0, MPPT sees P=0, system oscillates).
     // This headroom (in 0.01V/bit register units) ensures a minimum margin above Uout.
     static constexpr int VOLTAGE_HEADROOM_BITS           {50};    // 50 × 0.01V/bit = 0.50V above battery voltage
+    // OVP ceiling headroom above battery maxVoltage (in 0.01V/bit units).
+    // U_SET = (battery maxVoltage_mV + headroom) / 10, acting as a hardware backstop.
+    // The software CV controller is the primary voltage limit; this fires only if the
+    // software fails. Tight enough to protect the battery, loose enough that normal
+    // CV regulation noise does not trigger it.
+    static constexpr int OVP_CEILING_HEADROOM_BITS       {50};   // 50 × 0.01V/bit = 0.50V above battery maxVoltage
     static constexpr uint16_t ERROR_RECOVERY_TMO         {10000}; // ms — pause duration after too many errors
     static constexpr uint8_t  CONSECUTIVE_ERRORS_THRESHOLD {5};   // errors before triggering recovery pause
 }
@@ -61,6 +82,8 @@ class DPSxDcConverter : public Device, public ActuatorIf
     
     // ActuatorIf overrides
     ControlMode getControlMode() const override;
+    void setBatteryProfile(const BatteryProfile& profile) override;
+    bool areMeasurementsSettled() const override { return m_readsSinceLastWrite >= DPSxDcConverterConfig::SETTLE_READS_AFTER_WRITE; }
     int getMinControl() const override;
     int getMaxControl() const override;
     bool hasMeasurements() const override;
@@ -128,8 +151,12 @@ class DPSxDcConverter : public Device, public ActuatorIf
     bool m_outputEnabled{false};                     ///< Tracks current ON_OFF state; toggled by applyControl()
     bool m_onOffPending{false};                      ///< Queues an ON_OFF write when output enable state changes
     bool m_iSetInitPending{};                        ///< Write I_SET=max on first init (OCP ceiling)
+    bool m_uSetInitPending{};                        ///< Write U_SET to OVP ceiling on init/profile-change (prevents stale manual U_SET blocking current flow)
+    int  m_uSetVoltage_bits{DPSxDcConverterConfig::MAX_MPPT_VOLTAGE_CONTROL_VALUE}; ///< Runtime U_SET target (device max until setBatteryProfile() is called)
     uint8_t m_readsSinceLastWrite{};
     Timer m_messageTimer{};
+    bool m_startupComplete{false};                   ///< Blocks Modbus until STARTUP_DELAY_MS has elapsed after init()
+    Timer m_startupTimer{};
 
     // ===== Error Recovery Variables =====
     unsigned long m_lastUpdateTime{};

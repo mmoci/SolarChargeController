@@ -48,7 +48,7 @@ This page explains how all the components in the firmware fit together.
 ### `ChargeController` — main orchestrator
 
 - Reads fresh PV and battery measurements every loop tick.
-- Calls `handlePvPowerUnavailableTimer()` to decide whether charging is available.
+- Calls `updatePvAvailability()` to decide whether charging is available.
 - Gates MPPT perturbations on genuinely new hardware readings (`lastTimeUpdated()`).
 - Runs `BatteryManager::update()` to advance the charging state machine.
 - Applies current / voltage PI clamps when the battery manager requests them.
@@ -132,7 +132,7 @@ MeasurementsIf (PV)
     ▼
 ChargeController::update()
     │
-    ├── handlePvPowerUnavailableTimer()  →  isChargingAvailable flag
+    ├── updatePvAvailability()    →  isChargingAvailable flag
     │
     ├── MpptController::update()  →  requestedOutput (0-100)
     │

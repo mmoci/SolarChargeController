@@ -54,6 +54,11 @@ class DPSxMeasurements : public MeasurementsIf
         return millis() - p_dpsConverter->getLastUpdateTime();
     }
 
+    // Modbus RTU read cycle is ~450ms — orders of magnitude slower than the
+    // Arduino loop (~3ms). Signal ChargeController to gate PI and soft-ramp
+    // on new readings rather than running at loop rate.
+    bool hasMeasurementDelay() const override { return true; }
+
     private:
     DPSxDcConverter* p_dpsConverter;
     MeasurementSource m_measSource{};

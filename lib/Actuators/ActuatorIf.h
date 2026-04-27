@@ -1,4 +1,5 @@
 #pragma once
+#include "BatteryProfile.h"
 
 class ActuatorIf
 {
@@ -12,6 +13,15 @@ public:
 
     // Apply a control value decided by ChargeController
     virtual void applyControl(int controlValue) = 0;
+
+    // Called when the battery profile is set or changed. Actuators that use the
+    // battery profile (e.g. DPS OVP ceiling) should override this; default is no-op.
+    virtual void setBatteryProfile(const BatteryProfile& /*profile*/) {}
+
+    // Returns true when measurements reflect the currently applied setpoint.
+    // Actuators with write-to-read lag (e.g. Modbus) should override this to
+    // prevent P&O from computing gradients against a stale pre-write reading.
+    virtual bool areMeasurementsSettled() const { return true; }
 
     // Actuator capabilities
     virtual ControlMode getControlMode() const = 0;

@@ -24,11 +24,12 @@ namespace SensorConfig
 namespace ChargeControllerConfig
 {
     static constexpr long PV_POWER_THRESHOLD           {1000};  // 1W, When PV power is less or equal to 1W consider PV power unavailable (i.e. to small for charging)
+    static constexpr int  PV_INPUT_HEADROOM_MV         {1000};  // 1V — Vin must exceed Vbatt by at least this to indicate a panel is present. Below this the DPS buck converter cannot conduct (Vin < Vout), so no panel = no charging.
     static constexpr long PV_POWER_UNAVAILABLE_TIMEOUT {10000}; // 10sec, When PV power is unavailable for 10sec, set isChargingAvailable to false
     static constexpr unsigned long STALE_LOG_INTERVAL  {10000}; // 10sec, Minimum interval between repeated stale-measurement warnings
 
-    static constexpr double Kp {1.0};
-    static constexpr double Ki {0.01};
+    static constexpr double Kp {1.0}; // Proportional gain for clampLimitPI — how aggressively to reduce MPPT control in response to over-limit measurements. Higher Kp reduces overshoot but can cause instability; lower Kp is more stable but allows larger excursions above the limit. Recommend starting with a modest value (e.g. 0.5 to 2.0) and tuning based on observed performance.
+    static constexpr double Ki {0.01}; // Integral gain for clampLimitPI — how aggressively to accumulate error over time. Higher Ki eliminates steady-state error but can cause overshoot and instability; lower Ki is more stable but allows sustained excursions above the limit. Recommend starting with a small value (e.g. 0.001 to 0.1) and tuning based on observed performance.
     static constexpr long   MAX_INTEGRAL_ERROR {500};
     
 }

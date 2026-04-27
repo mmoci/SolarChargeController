@@ -14,14 +14,27 @@ void DPSxDcConverter::init()
     m_consecutiveErrors = 0;
     m_pauseRetrying = false;
     m_outputEnabled   = false;
-    m_onOffPending    = false;
-    m_iSetInitPending = true;  // Set current limit ceiling to device max on startup
+    m_setPointValue   = 0;     // Force re-write on next applyControl — prevents warm-reset desync where m_setPointValue retains an old value while the DPS hardware has I_SET=max from the iSetInit write below, causing applyControl to skip the needed write.
+    m_onOffPending    = true;  // Write ON_OFF=0 on startup — ensures output is off even if DPS retained enabled state from a previous session
+    m_iSetInitPending = true;  // Write I_SET=max on startup (OCP ceiling)
+    m_uSetInitPending = true;  // Write U_SET to safe voltage on startup (overrides stale manual setting)
     m_errorRecoveryTimer.reset();
     m_messageTimer.reset();
+    m_startupComplete = false;
+    m_startupTimer.trigger(); // trigger (not reset) so update() actually advances duration
 }
 
 void DPSxDcConverter::update()
 {
+    if (!m_startupComplete)
+    {
+        m_startupTimer.update();
+        if (m_startupTimer.getDuration() < DPSxDcConverterConfig::STARTUP_DELAY_MS)
+            return;
+        clearRxLine(); // flush any UART garbage accumulated during ESP32 boot
+        m_startupComplete = true;
+    }
+
     if(m_pauseRetrying)
     {
         m_errorRecoveryTimer.update();
@@ -41,10 +54,10 @@ void DPSxDcConverter::applyControl(int controlValue)
 {
     auto setPointValue{static_cast<int>(std::round(controlValue * getMaxControl() / 100.0))};
 
-    // Floor: when output is enabled, never set U_SET below battery terminal voltage.
-    // If U_SET < Uout the DPS cannot push current into the battery, Iout drops to 0,
-    // pvPower = Uin×Iout = 0, the PV-unavailable timer fires and the system oscillates.
-    if (controlValue > 0 && m_outVoltage_mV > 0)
+    // Floor: only relevant in VOLTAGE_SETPOINT mode. U_SET must exceed Vbatt or the DPS
+    // cannot push current into the battery (Iout→0). In CURRENT_SETPOINT mode I_SET directly
+    // controls current — no voltage floor is needed or meaningful.
+    if (m_controlMode == ControlMode::VOLTAGE_SETPOINT && controlValue > 0 && m_outVoltage_mV > 0)
     {
         const int battFloor = m_outVoltage_mV / 10 + DPSxDcConverterConfig::VOLTAGE_HEADROOM_BITS;
         setPointValue = std::max(setPointValue, battFloor);
@@ -70,6 +83,24 @@ void DPSxDcConverter::applyControl(int controlValue)
 ActuatorIf::ControlMode DPSxDcConverter::getControlMode() const
 {
     return m_controlMode;
+}
+
+void DPSxDcConverter::setBatteryProfile(const BatteryProfile& profile)
+{
+    // Compute the hardware OVP ceiling from the battery max voltage + headroom.
+    // This is the fallback if the software CV controller fails to limit voltage.
+    // Clamped to the device maximum so an out-of-range profile cannot produce an
+    // invalid Modbus register value.
+    const int requested = profile.maxVoltage_mV / 10 + DPSxDcConverterConfig::OVP_CEILING_HEADROOM_BITS;
+    const int clamped   = std::min(requested, DPSxDcConverterConfig::MAX_MPPT_VOLTAGE_CONTROL_VALUE);
+
+    if (clamped != m_uSetVoltage_bits)
+    {
+        m_uSetVoltage_bits = clamped;
+        m_uSetInitPending  = true;  // Schedule a U_SET write with the new ceiling
+        ESP_LOGI(TAG, "Battery profile updated — U_SET OVP ceiling set to %d (%.2fV)",
+                 m_uSetVoltage_bits, m_uSetVoltage_bits * 0.01f);
+    }
 }
 
 int DPSxDcConverter::getMinControl() const
@@ -103,7 +134,7 @@ void DPSxDcConverter::handleModbusMessages()
             m_activeMessageType   = ModbusMessageType::WRITE;
             m_readsSinceLastWrite = 0;
         }
-        // Priority 2: I_SET OCP ceiling — one-time init on startup
+        // Priority 2a: I_SET OCP ceiling — one-time init on startup
         else if (m_iSetInitPending)
         {
             m_activeWriteRegister = Register::I_SET;
@@ -112,9 +143,28 @@ void DPSxDcConverter::handleModbusMessages()
             m_activeMessageType   = ModbusMessageType::WRITE;
             m_readsSinceLastWrite = 0;
         }
+        // Priority 2b: U_SET voltage ceiling — one-time init on startup.
+        // In CURRENT_SETPOINT mode U_SET is never written by applyControl(), so any stale
+        // manual value (e.g. 6V set on the DPS front panel) would block current flow when
+        // Vbatt > U_SET. Writing a safe value here ensures the DPS can always push current.
+        else if (m_uSetInitPending)
+        {
+            m_activeWriteRegister = Register::U_SET;
+            m_activeWriteData     = static_cast<uint16_t>(m_uSetVoltage_bits);
+            m_uSetInitPending     = false;
+            m_activeMessageType   = ModbusMessageType::WRITE;
+            m_readsSinceLastWrite = 0;
+        }
         // Priority 3: U_SET / I_SET setpoint — must be applied BEFORE enabling output
         // so the DPS never turns on with a stale or zero setpoint.
-        else if(m_writeMessagePending && m_readsSinceLastWrite >= DPSxDcConverterConfig::MAX_READS_BEFORE_WRITE)
+        // Two conditions allow a write:
+        //   a) Output is about to be enabled (m_onOffPending && m_outputEnabled): write
+        //      the operating setpoint immediately, before the ON_OFF=1 in priority 4.
+        //      Without this, priority 4 can fire first while I_SET still holds the init
+        //      ceiling (3000 mA), causing a full-power burst on every startup.
+        //   b) Output already enabled and enough reads have elapsed: normal rate-limited
+        //      write to update the MPPT setpoint during a running charge session.
+        else if(m_writeMessagePending && ((m_onOffPending && m_outputEnabled) || m_readsSinceLastWrite >= DPSxDcConverterConfig::MAX_READS_BEFORE_WRITE))
         {
             m_activeWriteRegister = selectRegisterType();
             m_activeWriteData     = static_cast<uint16_t>(m_setPointValue);
@@ -175,9 +225,8 @@ void DPSxDcConverter::handleModbusMessages()
                 if(!buffer.empty())
                 {
                     // UOUT/IOUT/UIN read registers: 0.01V/bit and 0.01A/bit → multiply by 10 to get mV / mA
-                    // (I_SET write register uses 0.001A/bit — different resolution, write-only)
                     m_outVoltage_mV = buffer[0] * 10;
-                    m_outCurrent_mA = buffer[1];     // IOUT: 0.001A/bit → 1 bit = 1mA
+                    m_outCurrent_mA = buffer[1];  // Different resolution IOUT: 0.001A/bit → 1 bit = 1mA
                     m_inVoltage_mV  = buffer[3] * 10;
 
                     m_consecutiveErrors = 0; // Reset error count on successful read

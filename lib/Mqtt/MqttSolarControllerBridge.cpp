@@ -195,20 +195,21 @@ void MqttSolarControllerBridge::publishDiscovery()
         const char* objectId;
         const char* name;
         std::string stateTopic;
-        const char* unit;        // nullptr if not applicable
-        const char* deviceClass; // nullptr if not applicable
+        const char* unit;              // nullptr if not applicable
+        const char* deviceClass;       // nullptr if not applicable
+        int         displayPrecision;  // -1 = no suggestion (non-numeric / %-integer sensors)
         bool        retain;
     };
 
     const SensorEntry sensors[] = {
-        { "pv_voltage",         "PV Voltage",          m_topics.pvVoltage(),        "V", "voltage", false },
-        { "pv_current",         "PV Current",          m_topics.pvCurrent(),        "A", "current", false },
-        { "pv_power",           "PV Power",            m_topics.pvPower(),          "W", "power",   false },
-        { "battery_voltage",    "Battery Voltage",     m_topics.batteryVoltage(),   "V", "voltage", false },
-        { "battery_current",    "Battery Current",     m_topics.batteryCurrent(),   "A", "current", false },
-        { "charging_mode",      "Charging Mode",       m_topics.chargingMode(),     nullptr, nullptr, true },
-        { "control_signal_pct", "Control Signal",      m_topics.controlSignalPct(), "%",  nullptr,   true  },
-        { "efficiency_pct",     "Charging Efficiency", m_topics.efficiencyPct(),    "%",  nullptr,   true },
+        { "pv_voltage",         "PV Voltage",          m_topics.pvVoltage(),        "V", "voltage", 3,  false },
+        { "pv_current",         "PV Current",          m_topics.pvCurrent(),        "A", "current", 3,  false },
+        { "pv_power",           "PV Power",            m_topics.pvPower(),          "W", "power",   3,  false },
+        { "battery_voltage",    "Battery Voltage",     m_topics.batteryVoltage(),   "V", "voltage", 3,  false },
+        { "battery_current",    "Battery Current",     m_topics.batteryCurrent(),   "A", "current", 3,  false },
+        { "charging_mode",      "Charging Mode",       m_topics.chargingMode(),     nullptr, nullptr, -1, true },
+        { "control_signal_pct", "Control Signal",      m_topics.controlSignalPct(), "%",  nullptr,   -1, true  },
+        { "efficiency_pct",     "Charging Efficiency", m_topics.efficiencyPct(),    "%",  nullptr,   -1, true },
     };
 
     for (const auto& s : sensors)
@@ -217,8 +218,13 @@ void MqttSolarControllerBridge::publishDiscovery()
         doc["name"]               = s.name;
         doc["unique_id"]          = id + "_" + s.objectId;
         doc["state_topic"]        = s.stateTopic;
-        if (s.unit)        doc["unit_of_measurement"] = s.unit;
-        if (s.deviceClass) doc["device_class"]        = s.deviceClass;
+        if (s.unit)               doc["unit_of_measurement"]      = s.unit;
+        if (s.deviceClass)        doc["device_class"]              = s.deviceClass;
+        if (s.displayPrecision >= 0)
+        {
+            doc["state_class"]                = "measurement";
+            doc["suggested_display_precision"] = s.displayPrecision;
+        }
         doc["availability_topic"] = m_topics.availability();
         addDevice();
 
