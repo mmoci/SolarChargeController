@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vector>
+#include <deque>
 #include "Device.h"
 #include "ActuatorIf.h"
 #include "Utility.h"
@@ -131,6 +132,13 @@ class DPSxDcConverter : public Device, public ActuatorIf
         WRITE
     };
 
+    struct WriteRequest
+    {
+        Register address;
+        uint16_t data;
+        bool urgent{false}; // Used to prioritize certain writes (e.g. ON_OFF) over others (e.g. I_SET/U_SET)
+    };
+
     // ===== Configuration =====
     static constexpr uint16_t CRC16_DEFAULT_VALUE    {0xFFFF};
     static constexpr uint16_t CRC16_POLYNOMIAL_VALUE {0xA001};
@@ -145,18 +153,15 @@ class DPSxDcConverter : public Device, public ActuatorIf
     int m_setPointValue{};
     ModbusState m_messageState{};
     ModbusMessageType m_activeMessageType{};
-    bool m_writeMessagePending{};
-    Register m_activeWriteRegister{Register::U_SET}; ///< Captured at write dispatch time
-    uint16_t m_activeWriteData{};                    ///< Captured at write dispatch time
-    bool m_outputEnabled{false};                     ///< Tracks current ON_OFF state; toggled by applyControl()
-    bool m_onOffPending{false};                      ///< Queues an ON_OFF write when output enable state changes
-    bool m_iSetInitPending{};                        ///< Write I_SET=max on first init (OCP ceiling)
-    bool m_uSetInitPending{};                        ///< Write U_SET to OVP ceiling on init/profile-change (prevents stale manual U_SET blocking current flow)
+    Register m_activeWriteRegister{}; 
+    uint16_t m_activeWriteData{};
+    bool m_outputEnabled{};
+    bool m_startupComplete{}; ///< Blocks Modbus until STARTUP_DELAY_MS has elapsed after init()
     int  m_uSetVoltage_bits{DPSxDcConverterConfig::MAX_MPPT_VOLTAGE_CONTROL_VALUE}; ///< Runtime U_SET target (device max until setBatteryProfile() is called)
     uint8_t m_readsSinceLastWrite{};
     Timer m_messageTimer{};
-    bool m_startupComplete{false};                   ///< Blocks Modbus until STARTUP_DELAY_MS has elapsed after init()
     Timer m_startupTimer{};
+    std::deque<WriteRequest> m_writeRequestQueue{};
 
     // ===== Error Recovery Variables =====
     unsigned long m_lastUpdateTime{};
@@ -165,10 +170,22 @@ class DPSxDcConverter : public Device, public ActuatorIf
     Timer m_errorRecoveryTimer{};
 
     /**
-     * @brief 
-     * 
+     * @brief  Handles the Modbus message state machine, including sending requests, waiting for and processing responses, handling timeouts, 
+     *         and error recovery. Called from update() to allow non-blocking operation with timeouts. The state machine prioritizes write 
+     *         requests over reads to ensure timely application of control changes, while also enforcing a maximum number of reads between
+     *         writes to prevent starvation of control updates. Error handling includes counting consecutive errors and pausing communication
+     *         after a threshold is reached to allow transient issues to resolve.
      */
     void handleModbusMessages();
+
+    /**
+     * @brief Enqueues a write request to be sent to the Modbus device. Urgent requests are prioritized over regular requests.
+     * 
+     * @param address The register address to write to.
+     * @param data The data to write to the register.
+     * @param urgent Whether the request is urgent and should be prioritized.
+     */
+    void enqueWriteRequest(Register address, uint16_t data, bool urgent = false);
 
     /**
      * @brief Synchronous, blocking with timeout is the correct first design...
@@ -196,10 +213,11 @@ class DPSxDcConverter : public Device, public ActuatorIf
      * @brief Synchronous, blocking with timeout is the correct first design...
      *        Message fromat: [slave] [0x06] [reg_hi][reg_lo] [value_hi][value_lo] [crc_lo][crc_hi]
      * 
-     * @param address 
-     * @param data 
-     * @param slaveAddress 
-     * @return std::size_t 
+     * @param address The register address to write to.
+     * @param data The data to write to the register.
+     * @param slaveAddress The address of the slave device.
+     * @return std::size_t The number of bytes written.
+
      */
     std::size_t sendRegisterWriteReq(Register address, uint16_t data, uint8_t slaveAddress = DPSxDcConverterConfig::SLAVE_ADDRESS);
 
@@ -211,8 +229,11 @@ class DPSxDcConverter : public Device, public ActuatorIf
     bool receiveRegisterWriteRsp(Register address, uint16_t data, uint8_t slaveAddress = DPSxDcConverterConfig::SLAVE_ADDRESS);
 
      /**
-     * @brief 
-     * 
+     * @brief Flushes the UART RX line to clear any stale or corrupted data. Important to call before sending a new request, 
+     *        especially after timeouts or errors, to ensure that the next response is properly aligned and parsed. 
+     *        This is particularly relevant for the DPS5005, which can return partial or corrupted frames if the ESP32's 
+     *        UART glitches during boot or if there are communication issues. By clearing the RX line, we reduce the risk of
+     *        misinterpreting stale data as valid responses, which can lead to erroneous behavior in the control loop.
      */
     void clearRxLine();
 

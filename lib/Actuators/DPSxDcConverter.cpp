@@ -6,22 +6,27 @@ static constexpr char TAG[] = "DPSxDcConverter";
 
 void DPSxDcConverter::init()
 {
-    m_messageState = ModbusState::IDLE;
-    m_writeMessagePending = false;
-    m_activeMessageType = ModbusMessageType::NONE;
+    m_messageState        = ModbusState::IDLE;
+    m_activeMessageType   = ModbusMessageType::NONE;
     m_readsSinceLastWrite = 0;
-    m_lastUpdateTime = 0;
-    m_consecutiveErrors = 0;
-    m_pauseRetrying = false;
-    m_outputEnabled   = false;
-    m_setPointValue   = 0;     // Force re-write on next applyControl — prevents warm-reset desync where m_setPointValue retains an old value while the DPS hardware has I_SET=max from the iSetInit write below, causing applyControl to skip the needed write.
-    m_onOffPending    = true;  // Write ON_OFF=0 on startup — ensures output is off even if DPS retained enabled state from a previous session
-    m_iSetInitPending = true;  // Write I_SET=max on startup (OCP ceiling)
-    m_uSetInitPending = true;  // Write U_SET to safe voltage on startup (overrides stale manual setting)
+    m_lastUpdateTime      = 0;
+    m_consecutiveErrors   = 0;
+    m_pauseRetrying       = false;
+    m_outputEnabled       = false;
+    m_setPointValue       = DPSxDcConverterConfig::MAX_MPPT_CURRENT_CONTROL_VALUE;
+
+    // Enqueue initial writes to ensure a known safe state on startup: output disabled, OCP ceiling set, and U_SET at a safe voltage. 
+    // These are processed with priority over any new control writes that arrive around the same time, so the DPS is guaranteed to start in a safe state.
+    m_writeRequestQueue = {}; // Clear any pending writes that might be in the queue from a previous run (e.g. after a soft reset triggered by the watchdog)
+    enqueWriteRequest(Register::ON_OFF, 0, true); // Ensure the OFF command is sent first to prioritize safety on startup
+    enqueWriteRequest(Register::I_SET, static_cast<uint16_t>(DPSxDcConverterConfig::MAX_MPPT_CURRENT_CONTROL_VALUE));
+    enqueWriteRequest(Register::U_SET, static_cast<uint16_t>(m_uSetVoltage_bits));
+    
     m_errorRecoveryTimer.reset();
     m_messageTimer.reset();
-    m_startupComplete = false;
     m_startupTimer.trigger(); // trigger (not reset) so update() actually advances duration
+
+    m_startupComplete = false;
 }
 
 void DPSxDcConverter::update()
@@ -55,8 +60,6 @@ void DPSxDcConverter::applyControl(int controlValue)
     auto setPointValue{static_cast<int>(std::round(controlValue * getMaxControl() / 100.0))};
 
     // Floor: only relevant in VOLTAGE_SETPOINT mode. U_SET must exceed Vbatt or the DPS
-    // cannot push current into the battery (Iout→0). In CURRENT_SETPOINT mode I_SET directly
-    // controls current — no voltage floor is needed or meaningful.
     if (m_controlMode == ControlMode::VOLTAGE_SETPOINT && controlValue > 0 && m_outVoltage_mV > 0)
     {
         const int battFloor = m_outVoltage_mV / 10 + DPSxDcConverterConfig::VOLTAGE_HEADROOM_BITS;
@@ -66,16 +69,17 @@ void DPSxDcConverter::applyControl(int controlValue)
     if(m_setPointValue != setPointValue)
     {
         m_setPointValue = setPointValue;
-        m_writeMessagePending = true;
+        enqueWriteRequest(selectRegisterType(), static_cast<uint16_t>(m_setPointValue));
     }
 
     // Manage output enable/disable: ON_OFF=1 when charging, ON_OFF=0 when stopped.
-    // This ensures the DPS output relay tracks ChargeController intent, not DPS front-panel state.
     const bool shouldBeEnabled = (controlValue > 0);
     if (shouldBeEnabled != m_outputEnabled)
     {
         m_outputEnabled = shouldBeEnabled;
-        m_onOffPending  = true;
+        // Disable is urgent (safety — preempt everything). Enable is NOT urgent:
+        // FIFO order guarantees it arrives after the I_SET write enqueued above.
+        enqueWriteRequest(Register::ON_OFF, static_cast<uint16_t>(m_outputEnabled), !m_outputEnabled);
         ESP_LOGI(TAG, "Output %s", shouldBeEnabled ? "ENABLED" : "DISABLED");
     }
 }
@@ -97,9 +101,8 @@ void DPSxDcConverter::setBatteryProfile(const BatteryProfile& profile)
     if (clamped != m_uSetVoltage_bits)
     {
         m_uSetVoltage_bits = clamped;
-        m_uSetInitPending  = true;  // Schedule a U_SET write with the new ceiling
-        ESP_LOGI(TAG, "Battery profile updated — U_SET OVP ceiling set to %d (%.2fV)",
-                 m_uSetVoltage_bits, m_uSetVoltage_bits * 0.01f);
+        enqueWriteRequest(Register::U_SET, static_cast<uint16_t>(m_uSetVoltage_bits)); // Schedule a U_SET write with the new ceiling
+        ESP_LOGI(TAG, "Battery profile updated — U_SET OVP ceiling set to %d (%.2fV)", m_uSetVoltage_bits, m_uSetVoltage_bits * 0.01f);
     }
 }
 
@@ -125,60 +128,22 @@ void DPSxDcConverter::handleModbusMessages()
     switch(m_messageState)
     {
         case ModbusState::IDLE:
-        // Priority 1: Disable output immediately — safety, never defer
-        if (m_onOffPending && !m_outputEnabled)
+        if (!m_writeRequestQueue.empty()) // Prioritise writes if there are too many reads without a write, but don't interrupt an in-flight write
         {
-            m_activeWriteRegister = Register::ON_OFF;
-            m_activeWriteData     = 0;
-            m_onOffPending        = false;
-            m_activeMessageType   = ModbusMessageType::WRITE;
-            m_readsSinceLastWrite = 0;
-        }
-        // Priority 2a: I_SET OCP ceiling — one-time init on startup
-        else if (m_iSetInitPending)
-        {
-            m_activeWriteRegister = Register::I_SET;
-            m_activeWriteData     = static_cast<uint16_t>(DPSxDcConverterConfig::MAX_MPPT_CURRENT_CONTROL_VALUE);
-            m_iSetInitPending     = false;
-            m_activeMessageType   = ModbusMessageType::WRITE;
-            m_readsSinceLastWrite = 0;
-        }
-        // Priority 2b: U_SET voltage ceiling — one-time init on startup.
-        // In CURRENT_SETPOINT mode U_SET is never written by applyControl(), so any stale
-        // manual value (e.g. 6V set on the DPS front panel) would block current flow when
-        // Vbatt > U_SET. Writing a safe value here ensures the DPS can always push current.
-        else if (m_uSetInitPending)
-        {
-            m_activeWriteRegister = Register::U_SET;
-            m_activeWriteData     = static_cast<uint16_t>(m_uSetVoltage_bits);
-            m_uSetInitPending     = false;
-            m_activeMessageType   = ModbusMessageType::WRITE;
-            m_readsSinceLastWrite = 0;
-        }
-        // Priority 3: U_SET / I_SET setpoint — must be applied BEFORE enabling output
-        // so the DPS never turns on with a stale or zero setpoint.
-        // Two conditions allow a write:
-        //   a) Output is about to be enabled (m_onOffPending && m_outputEnabled): write
-        //      the operating setpoint immediately, before the ON_OFF=1 in priority 4.
-        //      Without this, priority 4 can fire first while I_SET still holds the init
-        //      ceiling (3000 mA), causing a full-power burst on every startup.
-        //   b) Output already enabled and enough reads have elapsed: normal rate-limited
-        //      write to update the MPPT setpoint during a running charge session.
-        else if(m_writeMessagePending && ((m_onOffPending && m_outputEnabled) || m_readsSinceLastWrite >= DPSxDcConverterConfig::MAX_READS_BEFORE_WRITE))
-        {
-            m_activeWriteRegister = selectRegisterType();
-            m_activeWriteData     = static_cast<uint16_t>(m_setPointValue);
-            m_activeMessageType   = ModbusMessageType::WRITE;
-            m_readsSinceLastWrite = 0;
-        }
-        // Priority 4: Enable output — only after correct setpoint has been written
-        else if (m_onOffPending && m_outputEnabled)
-        {
-            m_activeWriteRegister = Register::ON_OFF;
-            m_activeWriteData     = 1;
-            m_onOffPending        = false;
-            m_activeMessageType   = ModbusMessageType::WRITE;
-            m_readsSinceLastWrite = 0;
+            const auto& request = m_writeRequestQueue.front();
+
+            if(request.urgent || m_readsSinceLastWrite >= DPSxDcConverterConfig::MAX_READS_BEFORE_WRITE)
+            {
+                m_activeMessageType   = ModbusMessageType::WRITE;
+                m_activeWriteRegister = request.address;
+                m_activeWriteData     = request.data;
+                m_readsSinceLastWrite = 0;
+            }
+            else
+            {
+                m_activeMessageType = ModbusMessageType::READ;
+                ++m_readsSinceLastWrite;
+            }
         }
         else
         {
@@ -241,7 +206,7 @@ void DPSxDcConverter::handleModbusMessages()
             {
                 if(receiveRegisterWriteRsp(m_activeWriteRegister, m_activeWriteData))
                 {
-                    m_writeMessagePending = false;
+                    m_writeRequestQueue.pop_front(); // Remove the completed write request from the queue
                     m_consecutiveErrors = 0; // Reset error count on successful write
                     // Do NOT update m_lastUpdateTime here — writes don't produce measurement data.
                     // hasMeasurements() must stay false until the first successful READ so that
@@ -276,6 +241,25 @@ void DPSxDcConverter::handleModbusMessages()
         m_messageTimer.reset();
         break;
     }
+}
+
+void DPSxDcConverter::enqueWriteRequest(Register address, uint16_t data, bool urgent)
+{
+    for(auto& request : m_writeRequestQueue)
+    {
+        if(request.address == address)
+        {
+            // If there's already a pending write to the same register, update it with the new value and urgency
+            request.data = data;
+            request.urgent = request.urgent || urgent; // Once a request is marked urgent, it stays urgent until sent
+            ESP_LOGD(TAG, "Updated pending write request for reg=0x%02X to val=%d (urgent=%s)", static_cast<int>(address), data, request.urgent ? "true" : "false");
+            return; // Deduplicated — do not add a second entry for the same register
+        }
+    }
+    if(urgent)
+        m_writeRequestQueue.push_front({address, data, urgent});
+    else
+        m_writeRequestQueue.push_back({address, data, urgent});
 }
 
 std::size_t DPSxDcConverter::sendRegisterReadReq(Register startAddress, uint16_t nrOfRegisters, uint8_t slaveAddress)

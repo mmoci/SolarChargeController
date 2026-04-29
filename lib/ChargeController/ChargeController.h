@@ -61,7 +61,10 @@ class ChargeController
 
     bool isChargingAvailable();
     void updatePvAvailability(long pvPower_mW, int pvVoltage_mV, int battVoltage_mV);
-    int clampLimit(int measured, int limit, int mpptControl);
+    // Returns true when a genuinely new hardware reading has arrived this cycle.
+    // Internalises the isMeasurementRateLimited() fast-path so call sites in
+    // update() need only one unconditional assignment.
+    bool computeIsNewMeasurement(unsigned long pvUpdateAge) const;
     int clampLimitPI(int measured, int limit, int mpptControl, long& integralError);
     int softRampControl(int targetControl, int stepSize);
 };

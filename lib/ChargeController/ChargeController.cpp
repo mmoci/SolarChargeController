@@ -34,14 +34,11 @@ void ChargeController::update()
 {
     int mpptControl{};
     // Tracks whether a genuinely new hardware reading arrived this cycle. Used to gate
-    // clampLimitPI so the PI advances at Modbus feedback rate (~2 Hz) rather than at
-    // Arduino loop rate (~333 Hz). Without this gate, Kp=1.0 with a 40 mV error drives
-    // mpptControl to 0 in ~3 iterations (9 ms), causing premature CV→Done on boot.
-    // Only meaningful when hasMeasurementDelay() is true (DPS/Modbus). For fast
-    // sensors (INA226 ~3ms) hasMeasurementDelay() returns false and the gate is
-    // bypassed so PI and soft-ramp always advance, preserving the original behavior.
-    const bool slowMeasurements{m_pvMeasurements->hasMeasurementDelay()};
-    bool newMeasurement{!slowMeasurements}; // fast sensors: always treat as new
+    // clampLimitPI and soft-ramp so they advance at hardware feedback rate rather than
+    // Arduino loop rate. See computeIsNewMeasurement() for the full gating logic.
+    // Initialised conservatively: false for rate-limited sensors (DPS/Modbus) so that
+    // the PI does not fire on stale data in the measurement-invalid branches above.
+    bool newMeasurement{!m_pvMeasurements->isMeasurementRateLimited()};
 
     Measurements pvMeasurements{m_pvMeasurements->getVoltage_mV(), m_pvMeasurements->getCurrent_mA()};
     Measurements batteryMeasurements{m_batteryMeasurements->getVoltage_mV(), m_batteryMeasurements->getCurrent_mA()};
@@ -83,8 +80,7 @@ void ChargeController::update()
         // that value is smaller than the previous recorded update time, i.e. a new
         // read has completed since our last perturbation.
         const unsigned long pvUpdateAge{m_pvMeasurements->lastTimeUpdated()};
-        if (slowMeasurements)
-            newMeasurement = (pvUpdateAge < m_lastPvUpdateAge || m_lastPvUpdateAge == 0);
+        newMeasurement = computeIsNewMeasurement(pvUpdateAge);
         if (newMeasurement && m_wasChargingAllowed && m_actuator->areMeasurementsSettled() && !m_wasVoltageLimitActive)
         {
             // Only perturb MPPT while actively charging. When not charging (Idle/Done/Fault)
@@ -224,19 +220,6 @@ void ChargeController::updatePvAvailability(long pvPower_mW, int pvVoltage_mV, i
     m_pvPower_mW  = pvPower_mW;
 }
 
-int ChargeController::clampLimit(int measured, int limit, int mpptControl)
-{
-    if (measured <= 0) return mpptControl;
-
-    int deltaCurrent = measured - limit;
-    
-    if(deltaCurrent <= 0) return mpptControl;
-
-    int mpptControlCorrection = std::lround((static_cast<double>(mpptControl) / measured) * deltaCurrent);
-
-    return constrain(mpptControl - mpptControlCorrection, 0, 100);
-}
-
 int ChargeController::clampLimitPI(int measured, int limit, int mpptControl, long& integralError)
 {
     if (measured <= 0) 
@@ -246,6 +229,9 @@ int ChargeController::clampLimitPI(int measured, int limit, int mpptControl, lon
     
     if(error <= 0) 
     {
+        // Measured is within limit — MPPT is in control, this function does nothing.
+        // Reset integral so stale windup from a past violation does not amplify the
+        // first correction of the next independent limiting event.
         integralError = 0;
         return mpptControl;
     }
@@ -256,6 +242,15 @@ int ChargeController::clampLimitPI(int measured, int limit, int mpptControl, lon
     int mpptControlCorrection = static_cast<int>(std::roundl(ChargeControllerConfig::Kp * error + ChargeControllerConfig::Ki * integralError));
 
     return constrain(mpptControl - mpptControlCorrection, 0, 100);
+}
+
+bool ChargeController::computeIsNewMeasurement(unsigned long pvUpdateAge) const
+{
+    if (!m_pvMeasurements->isMeasurementRateLimited())
+        return true;  // fast sensors (INA226 ~3ms): every call produces a fresh reading
+    // Slow sensors (DPS Modbus ~450ms): a new reading has arrived when the age counter
+    // has wrapped (decreased), indicating the driver completed a fresh hardware read.
+    return pvUpdateAge < m_lastPvUpdateAge || m_lastPvUpdateAge == 0;
 }
 
 int ChargeController::softRampControl(int targetControl, int stepSize)
