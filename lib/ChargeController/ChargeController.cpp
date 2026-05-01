@@ -33,12 +33,7 @@ void ChargeController::init()
 void ChargeController::update()
 {
     int mpptControl{};
-    // Tracks whether a genuinely new hardware reading arrived this cycle. Used to gate
-    // clampLimitPI and soft-ramp so they advance at hardware feedback rate rather than
-    // Arduino loop rate. See computeIsNewMeasurement() for the full gating logic.
-    // Initialised conservatively: false for rate-limited sensors (DPS/Modbus) so that
-    // the PI does not fire on stale data in the measurement-invalid branches above.
-    bool newMeasurement{!m_pvMeasurements->isMeasurementRateLimited()};
+    bool newMeasurement{m_pvMeasurements->isMeasurementUpdated()}; // Tracks whether new hardware reading arrived this cycle. Used to gate MPPT updates and soft ramping so they only run once per new measurement, preventing them from running at loop speed (~6ms) and causing excessive ramping when measurements are stale (e.g. DPS disconnected, Modbus comms issue).
 
     Measurements pvMeasurements{m_pvMeasurements->getVoltage_mV(), m_pvMeasurements->getCurrent_mA()};
     Measurements batteryMeasurements{m_batteryMeasurements->getVoltage_mV(), m_batteryMeasurements->getCurrent_mA()};
@@ -67,21 +62,11 @@ void ChargeController::update()
     }
     else
     {
-        updatePvAvailability(
-            static_cast<long>(pvMeasurements.voltage_mV) * pvMeasurements.current_mA / 1000,
-            pvMeasurements.voltage_mV,
-            batteryMeasurements.voltage_mV);
+        // Convert to mW to avoid overflow and match typical PV power units
+        auto pvPower_mW = static_cast<long>(pvMeasurements.voltage_mV) * pvMeasurements.current_mA / 1000;
+        updatePvAvailability(pvPower_mW, pvMeasurements.voltage_mV, batteryMeasurements.voltage_mV);
 
-        // Only perturb the MPPT operating point when a genuinely new PV measurement
-        // has arrived. With the DPS (Modbus ~100ms cycle) the control loop runs ~15x
-        // per measurement update. Perturbing on stale data causes the P&O algorithm
-        // to see ΔP≈0 and toggle direction randomly, degrading tracking accuracy.
-        // lastTimeUpdated() returns ms-since-last-hardware-read; we perturb only when
-        // that value is smaller than the previous recorded update time, i.e. a new
-        // read has completed since our last perturbation.
-        const unsigned long pvUpdateAge{m_pvMeasurements->lastTimeUpdated()};
-        newMeasurement = computeIsNewMeasurement(pvUpdateAge);
-        if (newMeasurement && m_wasChargingAllowed && m_actuator->areMeasurementsSettled() && !m_wasVoltageLimitActive)
+        if (newMeasurement && m_wasChargingAllowed && !m_wasVoltageLimitActive && m_actuator->areMeasurementsSettled())
         {
             // Only perturb MPPT while actively charging. When not charging (Idle/Done/Fault)
             // there is no feedback signal (Iout=0, ΔV≈0) and the algorithm would wander
@@ -95,7 +80,6 @@ void ChargeController::update()
             // would corrupt the gradient and cause a full-speed ramp-up once CV releases.
             m_mpptController.update(pvMeasurements);
         }
-        m_lastPvUpdateAge = pvUpdateAge;
 
         // Soft ramp is gated on new settled measurements. Without this gate the ramp
         // advances at Arduino loop rate (~6ms): between two Modbus reads (~450ms) it
@@ -242,15 +226,6 @@ int ChargeController::clampLimitPI(int measured, int limit, int mpptControl, lon
     int mpptControlCorrection = static_cast<int>(std::roundl(ChargeControllerConfig::Kp * error + ChargeControllerConfig::Ki * integralError));
 
     return constrain(mpptControl - mpptControlCorrection, 0, 100);
-}
-
-bool ChargeController::computeIsNewMeasurement(unsigned long pvUpdateAge) const
-{
-    if (!m_pvMeasurements->isMeasurementRateLimited())
-        return true;  // fast sensors (INA226 ~3ms): every call produces a fresh reading
-    // Slow sensors (DPS Modbus ~450ms): a new reading has arrived when the age counter
-    // has wrapped (decreased), indicating the driver completed a fresh hardware read.
-    return pvUpdateAge < m_lastPvUpdateAge || m_lastPvUpdateAge == 0;
 }
 
 int ChargeController::softRampControl(int targetControl, int stepSize)

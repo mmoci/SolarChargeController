@@ -47,9 +47,17 @@ class SensorINA226 : public Device, public SensorI2C, public MeasurementsIf
     /**
      * @brief Returns milliseconds elapsed since the last successful I2C read.
      */
-    unsigned long lastTimeUpdated() const override
+    unsigned long measurementAge() const override
     {
         return millis() - m_lastUpdateTime;
+    }
+
+    virtual bool isMeasurementUpdated() override
+    {
+        const unsigned long age = measurementAge();
+        const bool updated = (age < m_lastMeasurementAge || m_lastMeasurementAge == 0);
+        m_lastMeasurementAge = age; // always update so the next detection reliably sees a large previous value
+        return updated;
     }
 
     private:
@@ -94,6 +102,7 @@ class SensorINA226 : public Device, public SensorI2C, public MeasurementsIf
     int m_current_mA{};
     int m_shunt_mOhm{};
     unsigned long m_lastUpdateTime{};
+    unsigned long m_lastMeasurementAge{};
 
     // If no successful read arrives within this window the measurement is
     // considered stale. INA226 reads every ~6ms so 100ms gives ~16x headroom

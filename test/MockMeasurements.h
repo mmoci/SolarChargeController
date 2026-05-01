@@ -9,7 +9,15 @@ public:
     int getVoltage_mV() const override { return m_voltage_mV; }
     int getCurrent_mA() const override { return m_current_mA; }
     bool isMeasurementValid() const override { return m_valid; }
-    unsigned long lastTimeUpdated() const override { return m_lastUpdate; }
+
+    bool isMeasurementUpdated() override
+    {
+        // m_lastUpdate is used as the age (ms since last read) in tests — same wrap
+        // detection as the real DPS/INA226 implementations.
+        const bool updated = (m_lastUpdate < m_lastMeasurementAge || m_lastMeasurementAge == 0);
+        m_lastMeasurementAge = m_lastUpdate;
+        return updated;
+    }
 
     // Setters for testing
     void setVoltage_mV(int voltage) { m_voltage_mV = voltage; }
@@ -22,4 +30,5 @@ private:
     int m_current_mA = 0;
     bool m_valid = true;
     unsigned long m_lastUpdate = 0;
+    unsigned long m_lastMeasurementAge = 0;
 };

@@ -36,11 +36,6 @@ class ChargeController
     long m_pvPower_mW{};
     bool m_pvAvailable{false}; // true when Vin > Vbatt+headroom (converter can physically conduct)
 
-    // Tracks the last reported PV measurement age so MPPT is only perturbed
-    // when a genuinely new hardware reading has arrived (relevant for DPS where
-    // Modbus takes ~100ms but the control loop runs every ~6ms).
-    unsigned long m_lastPvUpdateAge{0};
-
     // PI (Proportional & Integral) variables containing cumulative integral error
     long m_voltageIntegralError{};
     long m_currentIntegralError{};
@@ -61,10 +56,6 @@ class ChargeController
 
     bool isChargingAvailable();
     void updatePvAvailability(long pvPower_mW, int pvVoltage_mV, int battVoltage_mV);
-    // Returns true when a genuinely new hardware reading has arrived this cycle.
-    // Internalises the isMeasurementRateLimited() fast-path so call sites in
-    // update() need only one unconditional assignment.
-    bool computeIsNewMeasurement(unsigned long pvUpdateAge) const;
     int clampLimitPI(int measured, int limit, int mpptControl, long& integralError);
     int softRampControl(int targetControl, int stepSize);
 };

@@ -210,7 +210,7 @@ TEST_F(ChargeControllerTest, HandlesRapidPvChanges)
     }
 }
 
-// Test MPPT only perturbs when lastTimeUpdated reports a new hardware read
+// Test MPPT only perturbs when measurementAge reports a new hardware read
 TEST_F(ChargeControllerTest, MpptOnlyPerturbs_WhenNewMeasurementArrives)
 {
     // Static timestamp: same measurement repeated (no new hardware read)

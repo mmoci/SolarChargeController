@@ -46,20 +46,24 @@ class DPSxMeasurements : public MeasurementsIf
         if (!p_dpsConverter->hasMeasurements())
             return false;
 
-        return lastTimeUpdated() < MEASUREMENT_STALE_TIMEOUT_MS;
+        return measurementAge() < MEASUREMENT_STALE_TIMEOUT_MS;
     }
 
-    virtual unsigned long lastTimeUpdated() const override 
+    unsigned long measurementAge() const override 
     {
         return millis() - p_dpsConverter->getLastUpdateTime();
     }
 
-    // Modbus RTU read cycle is ~450ms — orders of magnitude slower than the
-    // Arduino loop (~3ms). Signal ChargeController to gate PI and soft-ramp
-    // on new readings rather than running at loop rate.
-    bool isMeasurementRateLimited() const override { return true; }
+    bool isMeasurementUpdated() override
+    {
+        const unsigned long age = measurementAge();
+        const bool updated = (age < m_lastMeasurementAge || m_lastMeasurementAge == 0);
+        m_lastMeasurementAge = age; // always update so the next detection reliably sees a large previous value
+        return updated;
+    }
 
     private:
     DPSxDcConverter* p_dpsConverter;
     MeasurementSource m_measSource{};
+    unsigned long m_lastMeasurementAge{};
 };

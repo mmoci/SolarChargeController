@@ -100,16 +100,16 @@ class DPSxDcConverter : public Device, public ActuatorIf
     enum class Register : uint16_t
     {
         // DPS5005 Modbus RTU register map
-        U_SET   = 0x0000, ///< Voltage setpoint         (R/W, 0.01V/bit,  e.g. 2400 = 24.00V)
-        I_SET   = 0x0001, ///< Current setpoint         (R/W, 0.001A/bit, e.g. 5000 = 5.000A)
-        UOUT    = 0x0002, ///< Output voltage           (R,   0.01V/bit)
-        IOUT    = 0x0003, ///< Output current           (R,   0.001A/bit)
-        POWER   = 0x0004, ///< Output power             (R,   0.1W/bit)
-        UIN     = 0x0005, ///< Input voltage            (R,   0.01V/bit)
-        LOCK    = 0x0006, ///< Key-lock: 0=off 1=on     (R/W)
-        PROTECT = 0x0007, ///< Protection flags: 0=OK 1=OVP 2=OCP 3=OPP (R)
-        CV_CC   = 0x0008, ///< CV/CC status: 0=CV 1=CC  (R, read-only — NOT the output switch)
-        ON_OFF  = 0x0009  ///< Output enable: 0=off 1=on (R/W)
+        U_SET   = 0x0000, // Voltage setpoint         (R/W, 0.01V/bit,  e.g. 2400 = 24.00V)
+        I_SET   = 0x0001, // Current setpoint         (R/W, 0.001A/bit, e.g. 5000 = 5.000A)
+        UOUT    = 0x0002, // Output voltage           (R,   0.01V/bit)
+        IOUT    = 0x0003, // Output current           (R,   0.001A/bit)
+        POWER   = 0x0004, // Output power             (R,   0.1W/bit)
+        UIN     = 0x0005, // Input voltage            (R,   0.01V/bit)
+        LOCK    = 0x0006, // Key-lock: 0=off 1=on     (R/W)
+        PROTECT = 0x0007, // Protection flags: 0=OK 1=OVP 2=OCP 3=OPP (R)
+        CV_CC   = 0x0008, // CV/CC status: 0=CV 1=CC  (R, read-only — NOT the output switch)
+        ON_OFF  = 0x0009  // Output enable: 0=off 1=on (R/W)
     };
 
     enum class Function : uint8_t
