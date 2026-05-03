@@ -55,11 +55,18 @@ void DPSxDcConverter::update()
     handleModbusMessages();
 }
 
+void DPSxDcConverter::enableOutput(bool enable, bool priority)
+{
+    m_outputEnabled = enable;
+    enqueWriteRequest(Register::ON_OFF, static_cast<uint16_t>(m_outputEnabled), priority);
+    ESP_LOGI(TAG, "Output %s", enable ? "ENABLED" : "DISABLED");
+}
+
 void DPSxDcConverter::applyControl(int controlValue) 
 {
     auto setPointValue{static_cast<int>(std::round(controlValue * getMaxControl() / 100.0))};
 
-    // Floor: only relevant in VOLTAGE_SETPOINT mode. U_SET must exceed Vbatt or the DPS
+    // Floor: only relevant in VOLTAGE_SETPOINT mode. U_SET must exceed Vbatt to push current into the battery; if the control value is too low, the DPS cannot regulate and the system oscillates.
     if (m_controlMode == ControlMode::VOLTAGE_SETPOINT && controlValue > 0 && m_outVoltage_mV > 0)
     {
         const int battFloor = m_outVoltage_mV / 10 + DPSxDcConverterConfig::VOLTAGE_HEADROOM_BITS;

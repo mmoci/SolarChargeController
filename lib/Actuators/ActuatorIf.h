@@ -11,6 +11,9 @@ public:
         CURRENT_SETPOINT
     };
 
+    // For actuators that can enable/disable output
+    virtual void enableOutput(bool enable, bool priority = false) = 0;
+
     // Apply a control value decided by ChargeController
     virtual void applyControl(int controlValue) = 0;
 

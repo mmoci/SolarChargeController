@@ -26,6 +26,7 @@ class PwmDcConverter : public Device, public ActuatorIf
     void update() override;
 
     // ActuatorIf overrides
+    void enableOutput(bool enable, bool priority = false) override;
     ControlMode getControlMode() const override;
     int getMinControl() const override;
     int getMaxControl() const override;

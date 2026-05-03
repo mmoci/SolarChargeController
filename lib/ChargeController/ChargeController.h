@@ -24,13 +24,13 @@ class ChargeController
     int getMpptControl() const { return m_mpptControl; }
 
     private:
+    // Pointers to hardware interfaces, injected via constructor for flexibility and testability
     MeasurementsIf*          m_pvMeasurements{};
     MeasurementsIf*          m_batteryMeasurements{};
     ActuatorIf*              m_actuator{};
     BatteryProfileSelector*  m_profileSelector{};
     BatteryManager           m_batteryManager{};
     MpptController           m_mpptController{};
-    
 
     // Used to determine if charging is available (PV input vs battery voltage)
     long m_pvPower_mW{};
@@ -54,8 +54,11 @@ class ChargeController
     // the panel was unloaded.
     bool m_wasVoltageLimitActive{false};
 
+    bool m_collapsingRecoveryRequested{false};
+
     bool isChargingAvailable();
-    void updatePvAvailability(long pvPower_mW, int pvVoltage_mV, int battVoltage_mV);
+    bool updatePvAvailability(long pvPower_mW, int pvVoltage_mV, int battVoltage_mV);
     int clampLimitPI(int measured, int limit, int mpptControl, long& integralError);
     int softRampControl(int targetControl, int stepSize);
+    void handlePvCollapse(int pvVoltage_mV, int battVoltage_mV);
 };

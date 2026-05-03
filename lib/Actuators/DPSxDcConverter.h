@@ -89,6 +89,7 @@ class DPSxDcConverter : public Device, public ActuatorIf
     int getMaxControl() const override;
     bool hasMeasurements() const override;
     int  getMaxSoftStep()  const override { return DPSxDcConverterConfig::MAX_SOFT_STEP; }
+    void enableOutput(bool enable, bool priority = false) override;
     void applyControl(int controlValue) override;
     
     int getInVoltage_mV() const {return m_inVoltage_mV;}

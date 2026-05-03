@@ -95,6 +95,9 @@ void ChargeController::update()
         {
             mpptControl = m_mpptControl;
         }
+
+        if (newMeasurement)
+            handlePvCollapse(pvMeasurements.voltage_mV, batteryMeasurements.voltage_mV);
     }
 
     // Only update battery state machine when measurements are valid.
@@ -186,7 +189,7 @@ bool ChargeController::isChargingAvailable()
     return m_pvAvailable;
 }
 
-void ChargeController::updatePvAvailability(long pvPower_mW, int pvVoltage_mV, int battVoltage_mV)
+bool ChargeController::updatePvAvailability(long pvPower_mW, int pvVoltage_mV, int battVoltage_mV)
 {
     // PV is available when EITHER condition holds:
     //  1. Power above threshold: output is ON and current is flowing (proves the source is present
@@ -194,14 +197,15 @@ void ChargeController::updatePvAvailability(long pvPower_mW, int pvVoltage_mV, i
     //  2. Voltage above Vbatt+headroom: source is present but output is not yet on (open-circuit
     //     Vin visible, e.g. between charge cycles or at startup).
     // When NEITHER holds (Vin ≤ Vbatt, Iout=0): panel absent / night / source disconnected.
-    const bool pvAvailable = (pvPower_mW > ChargeControllerConfig::PV_POWER_THRESHOLD)
-                          || (pvVoltage_mV > battVoltage_mV + ChargeControllerConfig::PV_INPUT_HEADROOM_MV);
+    const bool pvAvailable {(pvPower_mW > ChargeControllerConfig::PV_POWER_THRESHOLD) || (pvVoltage_mV > battVoltage_mV + ChargeControllerConfig::PV_INPUT_HEADROOM_MV)};
 
     if (m_pvAvailable != pvAvailable)
         ESP_LOGI(TAG, "PV input %s Vbatt (Vin=%dmV Vbatt=%dmV)", pvAvailable ? "above" : "below", pvVoltage_mV, battVoltage_mV);
 
     m_pvAvailable = pvAvailable;
     m_pvPower_mW  = pvPower_mW;
+
+    return m_pvAvailable != pvAvailable;
 }
 
 int ChargeController::clampLimitPI(int measured, int limit, int mpptControl, long& integralError)
@@ -235,4 +239,23 @@ int ChargeController::softRampControl(int targetControl, int stepSize)
     else if(targetControl < m_mpptControl)
             return std::max(targetControl, m_mpptControl - stepSize);
     return targetControl;
+}
+
+void ChargeController::handlePvCollapse(int pvVoltage_mV, int battVoltage_mV)
+{
+    if(m_mpptController.isPvPowerCollapsing() && !m_collapsingRecoveryRequested)
+    {
+        ESP_LOGW(TAG, "PV collapse detected (Vin=%dmV Vbatt=%dmV) — disabling output", pvVoltage_mV, battVoltage_mV);
+        m_actuator->enableOutput(false, true); // Urgent: preempts queue to immediately cut DPS output
+        m_collapsingRecoveryRequested = true;
+    }
+    else if(m_collapsingRecoveryRequested && m_actuator->areMeasurementsSettled())
+    {
+        // DPS has processed the disable and settled. Apply the backed-off I_SET first,
+        // then enable: FIFO queue ordering ensures I_SET reaches DPS before ON_OFF=1.
+        m_actuator->applyControl(m_mpptController.getRequestedOutput());
+        m_actuator->enableOutput(true); // Non-urgent: goes behind I_SET in the write queue
+        m_collapsingRecoveryRequested = false;
+        ESP_LOGI(TAG, "PV collapse recovery complete — output re-enabled at %d%%", m_mpptController.getRequestedOutput());
+    }
 }

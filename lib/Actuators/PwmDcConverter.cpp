@@ -47,6 +47,17 @@ bool PwmDcConverter::hasMeasurements() const
     return false;
 }
 
+void PwmDcConverter::enableOutput(bool enable, bool priority)
+{
+    if(enable)
+        // Default to 50% duty cycle when enabling output; ChargeController will adjust from there. 
+        // This prevents the system from sitting at 0% duty cycle when MPPT is enabled but the PV is not producing (e.g. startup, nighttime), 
+        // which would cause a long delay before MPPT ramps up to find the operating point when the sun comes out.
+        applyControl(PwmDcConverterConfig::DEFAULT_MPPT_CONTROL_VALUE); 
+    else
+        applyControl(0);
+}
+
 void PwmDcConverter::applyControl(int controlValue)
 {
     auto pwm {static_cast<int>(std::round(controlValue * getMaxControl() / 100.0))};
