@@ -88,13 +88,9 @@ void ChargeController::update()
         // When voltage-limited (CV active), hold the last control value; clampLimitPI
         // below will determine the actual output through the PI controller.
         if (newMeasurement && !m_wasVoltageLimitActive)
-        {
             mpptControl = softRampControl(m_mpptController.getRequestedOutput(), m_actuator->getMaxSoftStep());
-        }
         else
-        {
             mpptControl = m_mpptControl;
-        }
 
         if (newMeasurement)
             handlePvCollapse(pvMeasurements.voltage_mV, batteryMeasurements.voltage_mV);
@@ -104,19 +100,14 @@ void ChargeController::update()
     // Passing Vbatt=0 (no DPS response yet) would immediately trip the
     // minSafeVoltage fault — a terminal state with no recovery.
     if(m_batteryMeasurements->isMeasurementValid())
-        m_batteryManager.update(batteryMeasurements, isChargingAvailable());
+        m_batteryManager.update(batteryMeasurements, m_isPvAvailable);
 
     // Detect the not-charging → charging transition and reset MPPT to a clean
     // state. This ensures MPPT always starts from control=0 / direction=Up
     // rather than from a stale value accumulated while idle or from a previous
     // charge cycle that wandered to an arbitrary operating point.
-    const bool chargingAllowed = m_batteryManager.isChargingAllowed();
-    if (!m_wasChargingAllowed && chargingAllowed)
-    {
-        m_mpptController.init();
-        ESP_LOGI(TAG, "Charging started — MPPT reset to initial state");
-    }
-    m_wasChargingAllowed = chargingAllowed;
+    const bool chargingAllowed{m_batteryManager.isChargingAllowed()};
+    handleChargingStateChange(chargingAllowed);
 
     // Detect the CV → CC transition (voltage limit released). While CV was active MPPT
     // was frozen; reset it so it restarts clean rather than re-using gradient data from
@@ -125,7 +116,7 @@ void ChargeController::update()
     // Guard: only reset on CV→CC (chargingAllowed still true). Do NOT fire on CV→Done
     // or CV→Fault, where charging is disabled — in those cases the MPPT stays at 0
     // and the output-disable path below handles the actuator.
-    const bool voltageLimitActive = m_batteryManager.isVoltageLimitActive();
+    const bool voltageLimitActive{m_batteryManager.isVoltageLimitActive()};
     if (m_wasVoltageLimitActive && !voltageLimitActive && chargingAllowed)
     {
         m_mpptController.init();
@@ -136,10 +127,7 @@ void ChargeController::update()
     m_wasVoltageLimitActive = voltageLimitActive;
 
     if(!chargingAllowed)
-    {
-        m_actuator->applyControl(0);
-        return;
-    }
+        return; // Charging not active — nothing more to do this cycle
 
     // Gate PI controllers on newMeasurement: the PI must advance at the hardware
     // feedback rate (one Modbus read per ~900 ms), not at Arduino loop rate (~3 ms).
@@ -184,28 +172,21 @@ void ChargeController::update()
     m_actuator->applyControl(std::max(mpptControl, 1));
 }
 
-bool ChargeController::isChargingAvailable()
-{
-    return m_pvAvailable;
-}
-
 bool ChargeController::updatePvAvailability(long pvPower_mW, int pvVoltage_mV, int battVoltage_mV)
 {
-    // PV is available when EITHER condition holds:
-    //  1. Power above threshold: output is ON and current is flowing (proves the source is present
-    //     and conducting, even if Vin has drooped under load, e.g. PSU in CC mode).
-    //  2. Voltage above Vbatt+headroom: source is present but output is not yet on (open-circuit
-    //     Vin visible, e.g. between charge cycles or at startup).
-    // When NEITHER holds (Vin ≤ Vbatt, Iout=0): panel absent / night / source disconnected.
     const bool pvAvailable {(pvPower_mW > ChargeControllerConfig::PV_POWER_THRESHOLD) || (pvVoltage_mV > battVoltage_mV + ChargeControllerConfig::PV_INPUT_HEADROOM_MV)};
+    bool availabilityChanged{false};
 
-    if (m_pvAvailable != pvAvailable)
+    if (m_isPvAvailable != pvAvailable)
+    {
         ESP_LOGI(TAG, "PV input %s Vbatt (Vin=%dmV Vbatt=%dmV)", pvAvailable ? "above" : "below", pvVoltage_mV, battVoltage_mV);
-
-    m_pvAvailable = pvAvailable;
+        availabilityChanged = true;
+    }
+        
+    m_isPvAvailable = pvAvailable;
     m_pvPower_mW  = pvPower_mW;
 
-    return m_pvAvailable != pvAvailable;
+    return availabilityChanged;
 }
 
 int ChargeController::clampLimitPI(int measured, int limit, int mpptControl, long& integralError)
@@ -239,6 +220,23 @@ int ChargeController::softRampControl(int targetControl, int stepSize)
     else if(targetControl < m_mpptControl)
             return std::max(targetControl, m_mpptControl - stepSize);
     return targetControl;
+}
+
+void ChargeController::handleChargingStateChange(bool chargingAllowed)
+{
+    if (!m_wasChargingAllowed && chargingAllowed)
+    {
+        m_mpptController.init();
+        m_actuator->enableOutput(true); // Enable output on every charge-start transition (startup, recharge after full battery, etc.)
+        ESP_LOGI(TAG, "Charging started — MPPT reset to initial state");
+    }
+    else if (m_wasChargingAllowed && !chargingAllowed)
+    {
+        m_actuator->enableOutput(false, true); // Urgent: preempt any pending writes to immediately cut output
+        m_actuator->applyControl(0);           // Reset setpoint to 0 so MPPT restarts clean from 0% on next charge cycle
+        ESP_LOGI(TAG, "Charging stopped");
+    }
+    m_wasChargingAllowed = chargingAllowed;
 }
 
 void ChargeController::handlePvCollapse(int pvVoltage_mV, int battVoltage_mV)

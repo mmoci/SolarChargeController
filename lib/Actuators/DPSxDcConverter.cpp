@@ -57,6 +57,8 @@ void DPSxDcConverter::update()
 
 void DPSxDcConverter::enableOutput(bool enable, bool priority)
 {
+    if (enable == m_outputEnabled)
+        return; // Already in the desired state — no write needed, no log spam
     m_outputEnabled = enable;
     enqueWriteRequest(Register::ON_OFF, static_cast<uint16_t>(m_outputEnabled), priority);
     ESP_LOGI(TAG, "Output %s", enable ? "ENABLED" : "DISABLED");
@@ -77,17 +79,6 @@ void DPSxDcConverter::applyControl(int controlValue)
     {
         m_setPointValue = setPointValue;
         enqueWriteRequest(selectRegisterType(), static_cast<uint16_t>(m_setPointValue));
-    }
-
-    // Manage output enable/disable: ON_OFF=1 when charging, ON_OFF=0 when stopped.
-    const bool shouldBeEnabled = (controlValue > 0);
-    if (shouldBeEnabled != m_outputEnabled)
-    {
-        m_outputEnabled = shouldBeEnabled;
-        // Disable is urgent (safety — preempt everything). Enable is NOT urgent:
-        // FIFO order guarantees it arrives after the I_SET write enqueued above.
-        enqueWriteRequest(Register::ON_OFF, static_cast<uint16_t>(m_outputEnabled), !m_outputEnabled);
-        ESP_LOGI(TAG, "Output %s", shouldBeEnabled ? "ENABLED" : "DISABLED");
     }
 }
 
@@ -219,7 +210,7 @@ void DPSxDcConverter::handleModbusMessages()
                     // hasMeasurements() must stay false until the first successful READ so that
                     // isMeasurementValid() doesn't return true with Vbatt=0, which would trip
                     // BatteryManager into Fault before any real voltage has been observed.
-                    ESP_LOGD(TAG, "Write OK \u2014 reg=0x%02X val=%d", static_cast<int>(m_activeWriteRegister), m_activeWriteData);
+                    ESP_LOGD(TAG, "Write OK \u2014 register %s value=%d", registerAddressToString(m_activeWriteRegister).c_str(), m_activeWriteData);
                     m_messageState = ModbusState::IDLE;
                     m_messageTimer.reset();
                     break;
@@ -259,7 +250,7 @@ void DPSxDcConverter::enqueWriteRequest(Register address, uint16_t data, bool ur
             // If there's already a pending write to the same register, update it with the new value and urgency
             request.data = data;
             request.urgent = request.urgent || urgent; // Once a request is marked urgent, it stays urgent until sent
-            ESP_LOGD(TAG, "Updated pending write request for reg=0x%02X to val=%d (urgent=%s)", static_cast<int>(address), data, request.urgent ? "true" : "false");
+            ESP_LOGD(TAG, "Updated pending write request for register %s to value=%d (urgent=%s)", registerAddressToString(address).c_str(), data, request.urgent ? "true" : "false");
             return; // Deduplicated — do not add a second entry for the same register
         }
     }
@@ -301,7 +292,8 @@ std::vector<uint16_t> DPSxDcConverter::receiveRegisterReadRsp(uint16_t nrOfRegis
         buffer[2] != nrOfRegisters * 2 ||
         !verifyCRC16(buffer, SIZE))
     {
-        ESP_LOGW(TAG, "Received register READ parse failed [%02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X]",
+        ESP_LOGW(TAG, "Received register READ parse failed [%s %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X]",
+            registerAddressToString(static_cast<Register>(buffer[2])).c_str(),
             buffer[0], buffer[1], buffer[2], buffer[3], buffer[4], buffer[5], buffer[6],
             buffer[7], buffer[8], buffer[9], buffer[10], buffer[11], buffer[12]);
         clearRxLine();
@@ -326,8 +318,8 @@ std::size_t DPSxDcConverter::sendRegisterWriteReq(Register address, uint16_t dat
     // Fills last 2 bytes of the FRAME_SIZE with CRC bytes.
     appendCRC16Bytes(buffer, FRAME_SIZE - 2);
 
-    ESP_LOGD(TAG, "Send register WRITE [%02X %02X %02X %02X %02X %02X %02X %02X]",
-        buffer[0], buffer[1], buffer[2], buffer[3], buffer[4], buffer[5], buffer[6], buffer[7]);
+    ESP_LOGD(TAG, "Send register WRITE [%s %02X %02X %02X %02X %02X %02X %02X]",
+        registerAddressToString(address).c_str(), buffer[1], buffer[2], buffer[3], buffer[4], buffer[5], buffer[6], buffer[7]);
     return Serial2.write(buffer, FRAME_SIZE);
 }
 
@@ -341,8 +333,8 @@ bool DPSxDcConverter::receiveRegisterWriteRsp(Register address, uint16_t data, u
     if(Serial2.readBytes(buffer, FRAME_SIZE) != FRAME_SIZE)
         return false;
 
-    ESP_LOGD(TAG, "Received register WRITE [%02X %02X %02X %02X %02X %02X %02X %02X]",
-        buffer[0], buffer[1], buffer[2], buffer[3], buffer[4], buffer[5], buffer[6], buffer[7]);
+    ESP_LOGD(TAG, "Received register WRITE [%s %02X %02X %02X %02X %02X %02X %02X]",
+        registerAddressToString(address).c_str(), buffer[1], buffer[2], buffer[3], buffer[4], buffer[5], buffer[6], buffer[7]);
 
     if(!verifyCRC16(buffer, FRAME_SIZE))
     {
@@ -446,3 +438,21 @@ DPSxDcConverter::Register DPSxDcConverter::selectRegisterType()
 {
     return (m_controlMode == ControlMode::CURRENT_SETPOINT) ? Register::I_SET : Register::U_SET;
 }
+
+std::string DPSxDcConverter::registerAddressToString(Register reg)
+    {
+        switch(reg)
+        {
+            case Register::U_SET: return "U_SET";
+            case Register::I_SET: return "I_SET";
+            case Register::UOUT:  return "UOUT";
+            case Register::IOUT:  return "IOUT";
+            case Register::POWER: return "POWER";
+            case Register::UIN:   return "UIN";
+            case Register::LOCK:  return "LOCK";
+            case Register::PROTECT: return "PROTECT";
+            case Register::CV_CC: return "CV_CC";
+            case Register::ON_OFF: return "ON_OFF";
+            default: return "UNKNOWN_REGISTER";
+        }
+    }

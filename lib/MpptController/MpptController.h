@@ -22,12 +22,14 @@ class MpptController
     static constexpr int MIN_CONTROL_VALUE{0};
     static constexpr int MAX_CONTROL_VALUE{100};
     static constexpr int MIN_STEP{1};
-    static constexpr int MAX_STEP{5};
+    static constexpr int MAX_STEP{2}; // Keep overshoot small near the I-V knee; dynamic step handles fast climb when far from MPP
 
-    // A large |dP/dV| with ΔP<0 means voltage crashed in a single P&O step — the sharp-knee cliff.
-    // Normal P&O near MPP produces small gradients (~0.1–2 mW/mV). Start at 5.0f and tune:
-    // lower if genuine collapses are missed, higher if normal P&O steps trigger false alarms.
-    static constexpr float   COLLAPSE_GRADIENT_THRESHOLD_mW_mV = 5.0f;
+    // Voltage drop threshold for collapse detection. A genuine panel cliff collapse drops Vin by
+    // 20–30 V in a single P&O step (e.g. 41 V → 12.75 V = Vbatt). A normal P&O overshoot near
+    // MPP drops Vin by at most 1–2 V. Gradient-based detection is unreliable because both
+    // scenarios produce similar |dP/dV| values (1–4 mW/mV); voltage drop is unambiguous.
+    // Tune: raise if step-induced voltage dips > 5 V on your panel; lower not recommended.
+    static constexpr int     COLLAPSE_VOLTAGE_DROP_THRESHOLD_mV = 5000; // 5 V drop in one P&O step → collapse
     static constexpr unsigned long COLLAPSE_DURATION           = 5000UL; // Stabilization window (ms): P&O suppressed while DPS recovers after collapse
     static constexpr int     BACKOFF_COLLAPSE_FACTOR           = 70;    // Back off to 70% of the pre-collapse setpoint on detection
     static constexpr unsigned long CEILING_RELAX_INTERVAL_MS   = 30000UL; // Raise ceiling by 1% every 30 s so MPPT can adapt to improving irradiance

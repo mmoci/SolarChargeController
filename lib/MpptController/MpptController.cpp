@@ -57,17 +57,18 @@ void MpptController::update(Measurements pvMeasurements)
         {
             // Normal P&O: power dropped. Distinguish a genuine collapse (huge |dP/dV|) from a
             // normal overshoot (small |dP/dV|) and handle each differently.
-            if(gradient > COLLAPSE_GRADIENT_THRESHOLD_mW_mV)
+            if(deltaVoltage_mV < -static_cast<long>(COLLAPSE_VOLTAGE_DROP_THRESHOLD_mV))
             {
-                // Collapse: voltage crashed. Back off control immediately and signal ChargeController
-                // to cycle the DPS output (OFF → reduced I_SET → ON) to reset its regulation loop.
+                // Collapse: Vin crashed by > COLLAPSE_VOLTAGE_DROP_THRESHOLD_mV in one P&O step.
+                // Back off control and signal ChargeController to cycle the DPS output
+                // (OFF → reduced I_SET → ON) to reset its regulation loop.
                 m_collapsedTimer.trigger();
                 m_isCollapsing = true;
                 m_outputData.control = m_outputData.control * BACKOFF_COLLAPSE_FACTOR / 100;
                 m_collapseLimitData.control = m_outputData.control; // Ceiling = backed-off value
                 m_lastCeilingRelaxTime = millis();
-                ESP_LOGW(TAG, "PV collapse detected (|dP/dV|=%.3f mW/mV) — backing off to %d%%, ceiling set",
-                         gradient, m_outputData.control);
+                ESP_LOGW(TAG, "PV collapse detected (dV=%ldmV) — backing off to %d%%, ceiling set",
+                         deltaVoltage_mV, m_outputData.control);
             }
             else
             {
@@ -119,11 +120,10 @@ void MpptController::update(Measurements pvMeasurements)
     // Debug output — only log gradient when ΔV is large enough to be meaningful.
     // When ΔV=0 the direction/step logic was skipped; log "n/a" to avoid nan/inf.
     if (gradientValid)
-        ESP_LOGD(TAG, "|dP/dV|=%.3f, step=%d, direction=%s, control=%d%%, ceiling=%d%%",
+        ESP_LOGD(TAG, "|dP/dV|=%.3f, step=%d, direction=%s, control=%d%%",
                  gradient, m_step,
                  (m_direction == Direction::Up) ? "Up" : "Down",
-                 m_outputData.control,
-                 m_collapseLimitData.control);
+                 m_outputData.control);
     else
         ESP_LOGD(TAG, "|dP/dV|=n/a (dV=0), step=%d, direction=%s, control=%d%%",
                  m_step,

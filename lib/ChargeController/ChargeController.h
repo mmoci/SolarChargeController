@@ -34,7 +34,7 @@ class ChargeController
 
     // Used to determine if charging is available (PV input vs battery voltage)
     long m_pvPower_mW{};
-    bool m_pvAvailable{false}; // true when Vin > Vbatt+headroom (converter can physically conduct)
+    bool m_isPvAvailable{false}; // true when Vin > Vbatt+headroom (converter can physically conduct)
 
     // PI (Proportional & Integral) variables containing cumulative integral error
     long m_voltageIntegralError{};
@@ -56,9 +56,9 @@ class ChargeController
 
     bool m_collapsingRecoveryRequested{false};
 
-    bool isChargingAvailable();
     bool updatePvAvailability(long pvPower_mW, int pvVoltage_mV, int battVoltage_mV);
     int clampLimitPI(int measured, int limit, int mpptControl, long& integralError);
     int softRampControl(int targetControl, int stepSize);
+    void handleChargingStateChange(bool chargingAllowed);
     void handlePvCollapse(int pvVoltage_mV, int battVoltage_mV);
 };

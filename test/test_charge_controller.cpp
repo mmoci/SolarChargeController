@@ -72,7 +72,7 @@ TEST_F(ChargeControllerTest, StopsChargingWhenPVPowerUnavailable)
     controller.update();
     EXPECT_EQ(controller.getBatteryMode(), BatteryManager::Mode::CC);
 
-    // PV unavailable at 10002ms: isChargingAvailable() = false — BatteryManager sees false
+    // PV unavailable at 10002ms: isPvAvailable() = false — BatteryManager sees false
     // This triggers the 60s charging-disabled timer in BatteryManager
     advance_millis(1001);
     controller.update();

@@ -193,10 +193,10 @@ class DPSxDcConverter : public Device, public ActuatorIf
      *        Message format:
      *        [slave_adr] [0x03] [reg_hi][reg_lo] [count_hi][count_lo] [crc_lo][crc_hi]
      * 
-     * @param startAddress 
-     * @param nrOfRegisters 
-     * @param slaveAddress 
-     * @return std::size_t 
+     * @param startAddress The starting register address to read from.
+     * @param nrOfRegisters The number of registers to read.
+     * @param slaveAddress The address of the slave device.
+     * @return std::size_t The number of bytes written.
      */
     std::size_t sendRegisterReadReq(Register startAddress, uint16_t nrOfRegisters, uint8_t slaveAddress = DPSxDcConverterConfig::SLAVE_ADDRESS);
 
@@ -204,9 +204,9 @@ class DPSxDcConverter : public Device, public ActuatorIf
      * @brief Message format:
      *        [slave] [0x03] [byte_count] [data_hi][data_lo] ... repeated [crc_lo][crc_hi]
      * 
-     * @param slaveAddress 
-     * @param nrOfRegisters 
-     * @return std::vector<uint16_t> 
+     * @param slaveAddress The address of the slave device.
+     * @param nrOfRegisters The number of registers to read.
+     * @return std::vector<uint16_t> A vector containing the read register values.
      */
     std::vector<uint16_t> receiveRegisterReadRsp(uint16_t nrOfRegisters, uint8_t slaveAddress = DPSxDcConverterConfig::SLAVE_ADDRESS);
 
@@ -280,10 +280,21 @@ class DPSxDcConverter : public Device, public ActuatorIf
     uint16_t computeModbusCRC16(uint8_t* buffer, uint16_t size);
 
     /**
-     * @brief 
+     * @brief Selects the appropriate register for the control setpoint based on the configured control mode. 
+     *        For VOLTAGE_SETPOINT mode, it returns the U_SET register; for CURRENT_SETPOINT mode, it returns the I_SET register. 
+     *        This abstraction allows applyControl() to write to the correct register without needing to check the control mode each time, 
+     *        centralizing the logic for register selection in one place.
      * 
-     * @param controlMode 
-     * @return Register 
+     * @param controlMode The current control mode of the converter.
+     * @return Register The register corresponding to the current control mode.
      */
     Register selectRegisterType();
+
+    /**
+     * @brief Converts a register enum value to its corresponding string representation.
+     * 
+     * @param reg The register enum value.
+     * @return std::string The string representation of the register.
+     */
+    std::string registerAddressToString(Register reg);
 };
