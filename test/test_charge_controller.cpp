@@ -247,3 +247,56 @@ TEST_F(ChargeControllerTest, DoesNotFaultWhenBatteryMeasurementsStale)
     EXPECT_NE(controller.getBatteryMode(), BatteryManager::Mode::Fault);
     EXPECT_EQ(controller.getBatteryMode(), BatteryManager::Mode::Idle);
 }
+
+// Test that BatteryManager is not updated when BOTH PV and battery measurements are
+// stale simultaneously (e.g. DPS device not yet responding at startup).
+// Both pvValid and batteryValid are false — neither guard passes Vbatt=0 to
+// BatteryManager, so no Fault is triggered before real voltage is observed.
+TEST_F(ChargeControllerTest, DoesNotFaultWhenBothMeasurementsStale)
+{
+    batteryMeasurements.setVoltage_mV(0);   // would trip fault if passed through
+    batteryMeasurements.setCurrent_mA(0);
+    batteryMeasurements.setValid(false);    // stale — DPS not yet responding
+    pvMeasurements.setVoltage_mV(0);
+    pvMeasurements.setCurrent_mA(0);
+    pvMeasurements.setValid(false);         // also stale — same DPS source
+
+    for(int i = 0; i < 5; ++i)
+        controller.update();
+
+    EXPECT_NE(controller.getBatteryMode(), BatteryManager::Mode::Fault);
+    EXPECT_EQ(controller.getBatteryMode(), BatteryManager::Mode::Idle);
+}
+
+// Test PI clamps (applyLimitConstraints) do NOT advance when measurements are
+// valid but not updated this cycle (State::NotUpdated). Without this gate the PI
+// integrator accumulates at loop rate (~3ms) on stale data instead of Modbus
+// rate (~900ms), which drives mpptControl to 0 in ~9ms on first CV entry.
+TEST_F(ChargeControllerTest, PiClamps_DoNotAdvance_WhenMeasurementsNotUpdated)
+{
+    pvMeasurements.setVoltage_mV(18000);
+    pvMeasurements.setCurrent_mA(5000);
+    batteryMeasurements.setVoltage_mV(12600);  // maxVoltage_mV — triggers CV
+    batteryMeasurements.setCurrent_mA(500);    // above cutoff (100mA) — stay in CV
+
+    // setLastUpdate(0): age=0, lastMeasurementAge resets to 0 each call, so
+    // (0 < 0 || 0 == 0) is always true — every update returns Updated state.
+    // Run enough cycles to reach CV mode (Idle→CC→CV takes ~2-3 updates).
+    pvMeasurements.setLastUpdate(0);
+    for (int i = 0; i < 5; ++i)
+        controller.update();
+    ASSERT_EQ(controller.getBatteryMode(), BatteryManager::Mode::CV);
+
+    // Freeze age at 100ms. First call: lastMeasurementAge was 0 (from above) →
+    // (100 < 0 || 0 == 0) = true → Updated, PI runs, establishes baseline setpoint.
+    pvMeasurements.setLastUpdate(100);
+    controller.update();
+    const int controlAfterFirstUpdate = actuator.getLastControl();
+
+    // Subsequent calls: age=100, lastMeasurementAge=100 → NotUpdated, PI must NOT advance.
+    // If the gate is broken, repeated voltage PI corrections would drive control toward 0.
+    for (int i = 0; i < 10; ++i)
+        controller.update();
+
+    EXPECT_EQ(actuator.getLastControl(), controlAfterFirstUpdate);
+}

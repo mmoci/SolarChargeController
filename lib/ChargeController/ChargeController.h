@@ -32,9 +32,17 @@ class ChargeController
     BatteryManager           m_batteryManager{};
     MpptController           m_mpptController{};
 
+    struct MeasurementSnapshot
+    {
+        Measurements pv{};
+        Measurements battery{};
+        bool pvValid{false};      // PV measurement is within stale timeout
+        bool batteryValid{false}; // Battery measurement is within stale timeout
+        bool updated{false};      // New PV reading arrived this cycle (implies pvValid)
+    };
+
     // Used to determine if charging is available (PV input vs battery voltage)
-    long m_pvPower_mW{};
-    bool m_isPvAvailable{false}; // true when Vin > Vbatt+headroom (converter can physically conduct)
+    bool m_isPvAvailable{false};
 
     // PI (Proportional & Integral) variables containing cumulative integral error
     long m_voltageIntegralError{};
@@ -54,11 +62,16 @@ class ChargeController
     // the panel was unloaded.
     bool m_wasVoltageLimitActive{false};
 
+    // Tracks whether we've detected a PV collapse and requested recovery.
     bool m_collapsingRecoveryRequested{false};
 
-    bool updatePvAvailability(long pvPower_mW, int pvVoltage_mV, int battVoltage_mV);
+    bool updatePvAvailability(Measurements pvMeasurements, Measurements batteryMeasurements);
     int clampLimitPI(int measured, int limit, int mpptControl, long& integralError);
     int softRampControl(int targetControl, int stepSize);
     void handleChargingStateChange(bool chargingAllowed);
+    void handleVoltageLimitStateChange(bool isVoltageLimitActive);
     void handlePvCollapse(int pvVoltage_mV, int battVoltage_mV);
+    MeasurementSnapshot sampleMeasurements();
+    int computeDesiredSetpoint(MeasurementSnapshot snapshot);
+    int applyLimitConstraints(int desiredSetpoint, MeasurementSnapshot snapshot);
 };

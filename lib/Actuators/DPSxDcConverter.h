@@ -21,7 +21,7 @@ namespace DPSxDcConverterConfig
     // MAX values represent the register value written at 100% control output.
     static constexpr int MAX_MPPT_VOLTAGE_CONTROL_VALUE   {5000}; // 50.00V in 0.01V/bit units
     static constexpr int MAX_MPPT_CURRENT_CONTROL_VALUE   {3000}; // 3.000A — limited for PSU bench testing (PSU CC limit); restore to 5000 for real panel
-    static constexpr int MAX_SOFT_STEP                    {1};    // Conservative: Modbus RTU ~50-100ms per cycle → slow response, so we limit soft step to prevent overshooting. May need tuning based on system response and stability.
+    static constexpr int MAX_SOFT_STEP                    {2};    // Must be >= MpptController::MAX_STEP (2) so each P&O perturbation is fully delivered within one measurement cycle. If soft step < MPPT step, the ramp only partially delivers each perturbation, causing MPPT to make direction decisions on half-applied setpoints and producing a systematic lag where I_SET keeps climbing even after MPPT target reverses.
 
     constexpr int selectControlValueFromControlMode()
     {

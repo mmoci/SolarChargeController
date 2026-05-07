@@ -114,7 +114,7 @@ homeassistant/{component}/{deviceId}/{objectId}/config
 #### **Measurements Interface** (`Measurements/`)
 - `MeasurementsIf`: Base interface for sensor abstraction
 - Voltage and current data structures
-- Stale-measurement detection (`isMeasurementValid()` / `lastTimeUpdated()`)
+- Stale-measurement detection (`isMeasurementValid()` / `isMeasurementUpdated()`)
 
 #### **Logger** (`Logger/`)
 Portable logging shim that routes log calls to the appropriate backend:
@@ -127,7 +127,7 @@ Portable logging shim that routes log calls to the appropriate backend:
 Build-time and runtime configuration constants:
 - INA226 I2C addresses and shunt resistor values (with `PV_SHUNT_mOhm` / `BATTERY_SHUNT_mOhm`)
 - Charge controller PI gains and soft-ramp step sizes (tuned separately for DPS/PWM via `#ifdef`)
-- `STALE_LOG_INTERVAL` (5 s): minimum interval between repeated stale-measurement warnings, preventing serial flood during sensor loss
+- `STALE_LOG_INTERVAL` (10 s): minimum interval between repeated stale-measurement warnings, preventing serial flood during sensor loss
 - Predefined battery profiles (`LI_ION_3S_DEFAULT`, `LI_ION_4S_DEFAULT`, `LIFEPO4_4S_DEFAULT`, `CUSTOM_DEFAULT`)
 
 #### **Utilities** (`Utility.h`)
@@ -193,7 +193,7 @@ Solar Panel → PV Sensors → ChargeController → MPPT Algorithm → PWM/DPS A
 
 ## Testing
 
-The project includes comprehensive unit tests (**61 test cases**, all passing):
+The project includes comprehensive unit tests (**64 test cases**, all passing):
 - `test_battery_manager.cpp`: Battery state machine and charging mode transitions — including Fault terminal state, CV→Done, Done→CC recharge, precharge current cap (500 mA), and charging-disabled timeout (60 s)
 - `test_charge_controller.cpp`: Main controller logic and MPPT integration — including time-based PV power unavailability, stale-measurement handling, and MPPT gate (only perturbs on fresh measurements)
 - `test_mppt_controller.cpp`: MPPT algorithm verification
