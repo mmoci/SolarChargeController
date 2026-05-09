@@ -10,11 +10,8 @@
 
 static constexpr char TAG[] = "Main";
 
-
 #ifdef MQTT_CLIENT
 static constexpr std::string_view DEVICE_ID {"solar_controller_1"};
-// Constructed as std::string (owning) because string_view cannot hold a concatenated result.
-// Matches MqttSolarControllerTopicBuilder::availability() = "solar/{DEVICE_ID}/availability".
 static const std::string AVAILABILITY_TOPIC {"solar/" + std::string{DEVICE_ID} + "/availability"};
 
 MqttClient::Config mqttConfig{
@@ -47,6 +44,7 @@ ChargeController controller{
     &Initializer::getInstance().getBatteryMeasurements(),
     &Initializer::getInstance().getActuator(),
     &profileSelector};
+
 #ifdef MQTT_CLIENT
 OtaHandler otaHandler{{.hostname = DEVICE_ID, .password = OTA_PASSWORD}, &Initializer::getInstance().getActuator()};
 #endif

@@ -26,6 +26,11 @@ void MqttSolarControllerBridge::init()
 {
     registerCommands();
 
+    Logger::setLogHandler([this](const std::string& level, const std::string& tag, const std::string& message)
+    {
+        publishLog(level, tag, message);
+    });
+
     // On every (re)connect: republish HA discovery + current profile state.
     // Discovery is re-published so HA picks it up even if HA restarted while
     // the controller was offline.
@@ -33,6 +38,7 @@ void MqttSolarControllerBridge::init()
     {
         publishDiscovery();
         publishProfileState();
+        publishLogDebugState();
     });
 }
 
@@ -60,6 +66,21 @@ void MqttSolarControllerBridge::publishTelemetry(const MeasurementsIf& pvMeas, c
         m_mqttClient.publish(m_topics.controlSignalPct(), std::to_string(mpptControl_pct), /*retain=*/true);
         m_mqttClient.publish(m_topics.efficiencyPct(), std::to_string(efficiency_pct), /*retain=*/true);
     }
+}
+
+void MqttSolarControllerBridge::publishLog(const std::string& level, const std::string& tag, const std::string& message)
+{
+    if (!m_mqttClient.isConnected()) return;
+
+    JsonDocument doc;
+    doc["timestamp"] = millis();
+    doc["level"] = level;
+    doc["tag"] = tag;
+    doc["message"] = message;
+
+    std::string payload;
+    serializeJson(doc, payload);
+    m_mqttClient.publish(m_topics.logTopic(), payload);
 }
 
 // ---------------------------------------------------------------------------
@@ -97,6 +118,12 @@ void MqttSolarControllerBridge::registerCommands()
     {
         handleIntCommand("max_charging_current", payload, [this](int value) { return m_profileSelector.setMaxChargingCurrent(value); });
     });
+
+    // Debug log forwarding toggle: payload "true" enables MQTT forwarding of DEBUG messages
+    m_mqttClient.subscribe(m_topics.logDebugSet(), [this](std::string_view payload)
+    {
+        onMqttDebugSet(payload);
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -122,6 +149,19 @@ void MqttSolarControllerBridge::onBatteryTypeSet(std::string_view payload)
 
     ESP_LOGI(TAG, "Battery type set to %.*s", static_cast<int>(payload.size()), payload.data());
     publishProfileState();
+}
+
+void MqttSolarControllerBridge::onMqttDebugSet(std::string_view payload)
+{
+    const bool enable = {payload == "true" || payload == "1"};
+    Logger::mqttDebugEnabled = enable;
+    ESP_LOGI(TAG, "MQTT debug forwarding %s", enable ? "enabled" : "disabled");
+    publishLogDebugState();
+}
+
+void MqttSolarControllerBridge::publishLogDebugState()
+{
+    m_mqttClient.publish(m_topics.logDebugState(), Logger::mqttDebugEnabled ? "true" : "false", /*retain=*/true);
 }
 
 void MqttSolarControllerBridge::handleIntCommand(std::string_view name, std::string_view payload, std::function<BatteryProfileSelector::Result(int)> setterFn)

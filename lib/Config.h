@@ -105,5 +105,4 @@ namespace BatteryConfig
         static const BatteryProfile batteryProfiles[] = {LI_ION_3S_DEFAULT, LI_ION_4S_DEFAULT, LIFEPO4_4S_DEFAULT, CUSTOM_DEFAULT};
         return batteryProfiles[static_cast<std::size_t>(type)];
     }
-
 }

@@ -9,7 +9,6 @@ namespace PwmDcConverterConfig
     static constexpr int DEFAULT_RESOLUTION  {8}; // bits
     static constexpr int DEFAULT_LED_CHANNEL {0};
     static constexpr int DEFAULT_FREQUENCY   {10000};
-    static constexpr int MAX_SOFT_STEP       {5}; // Aggressive: PWM responds within one loop cycle so we can allow larger soft steps for faster ramping, but this may need to be tuned based on system response and stability.
 
     static constexpr ActuatorIf::ControlMode CONTROL_MODE {ActuatorIf::ControlMode::DUTY_CYCLE};
     inline static int MAX_MPPT_CONTROL_VALUE              {static_cast<int>(std::roundl(std::pow(2, DEFAULT_RESOLUTION)))};
@@ -31,7 +30,6 @@ class PwmDcConverter : public Device, public ActuatorIf
     int getMinControl() const override;
     int getMaxControl() const override;
     bool hasMeasurements() const override;
-    int  getMaxSoftStep()  const override { return PwmDcConverterConfig::MAX_SOFT_STEP; }
     void applyControl(int controlValue) override;
 
     private:

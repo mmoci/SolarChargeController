@@ -1,5 +1,9 @@
 #pragma once
 
+#include <functional>
+#include <string>
+#include <cstdarg>
+
 /**
  * @file Logger.h
  * @brief Portable logging shim.
@@ -19,7 +23,13 @@
  *   ESP_LOGW(TAG, "Measurement stale");        // degraded but operational
  *   ESP_LOGE(TAG, "NVS error: %d", err);       // failures
  *   ESP_LOGD(TAG, "Tx: %02X %02X", b0, b1);   // high-frequency detail, stripped in non-debug builds
+ *
+ * MQTT sink (optional):
+ *   Call Logger::setLogHandler() once from setup() to forward all log levels to MQTT.
+ *   Logger::clearLogHandler() removes the handler (e.g. before MQTT disconnect).
  */
+
+using LogHandlerFn = std::function<void(const std::string& level, const std::string& tag, const std::string& message)>;
 
 #if defined(ESP32) || defined(ESP_PLATFORM)
     // ESP32 / ESP-IDF: use native logging — runtime level control available
@@ -54,21 +64,33 @@
     }
     #define _LOG_TS() ([]() -> const char* { static char _b[16]; return _log_fmt_time(_b, (unsigned long)esp_log_timestamp()); }())
 
-    #define ESP_LOGE(tag, fmt, ...) esp_log_write(ESP_LOG_ERROR, tag, "[ERROR] [%s] %s: " fmt "\n", _LOG_TS(), tag, ##__VA_ARGS__)
-    #define ESP_LOGI(tag, fmt, ...) esp_log_write(ESP_LOG_INFO,  tag, "[INFO]  [%s] %s: " fmt "\n", _LOG_TS(), tag, ##__VA_ARGS__)
-    #define ESP_LOGW(tag, fmt, ...) esp_log_write(ESP_LOG_WARN,  tag, "[WARN]  [%s] %s: " fmt "\n", _LOG_TS(), tag, ##__VA_ARGS__)
-    #define ESP_LOGD(tag, fmt, ...) esp_log_write(ESP_LOG_DEBUG, tag, "[DEBUG] [%s] %s: " fmt "\n", _LOG_TS(), tag, ##__VA_ARGS__)
+    #define ESP_LOGE(tag, fmt, ...) do { \
+        esp_log_write(ESP_LOG_ERROR, tag, "[ERROR] [%s] %s: " fmt "\n", _LOG_TS(), tag, ##__VA_ARGS__); \
+        Logger::_dispatch("ERROR", tag, fmt, ##__VA_ARGS__); \
+    } while(0)
+    #define ESP_LOGI(tag, fmt, ...) do { \
+        esp_log_write(ESP_LOG_INFO,  tag, "[INFO]  [%s] %s: " fmt "\n", _LOG_TS(), tag, ##__VA_ARGS__); \
+        Logger::_dispatch("INFO",  tag, fmt, ##__VA_ARGS__); \
+    } while(0)
+    #define ESP_LOGW(tag, fmt, ...) do { \
+        esp_log_write(ESP_LOG_WARN,  tag, "[WARN]  [%s] %s: " fmt "\n", _LOG_TS(), tag, ##__VA_ARGS__); \
+        Logger::_dispatch("WARN",  tag, fmt, ##__VA_ARGS__); \
+    } while(0)
+    #define ESP_LOGD(tag, fmt, ...) do { \
+        esp_log_write(ESP_LOG_DEBUG, tag, "[DEBUG] [%s] %s: " fmt "\n", _LOG_TS(), tag, ##__VA_ARGS__); \
+        if (Logger::mqttDebugEnabled) Logger::_dispatch("DEBUG", tag, fmt, ##__VA_ARGS__); \
+    } while(0)
 
 #elif defined(ARDUINO)
     // Generic Arduino: Serial output, DEBUG suppressed
     #include <Arduino.h>
-    #define ESP_LOGE(tag, fmt, ...) do { Serial.printf("[ERROR][%s] " fmt "\n", tag, ##__VA_ARGS__); } while(0)
-    #define ESP_LOGW(tag, fmt, ...) do { Serial.printf("[WARNING][%s] " fmt "\n", tag, ##__VA_ARGS__); } while(0)
-    #define ESP_LOGI(tag, fmt, ...) do { Serial.printf("[INFO][%s] " fmt "\n", tag, ##__VA_ARGS__); } while(0)
-    #define ESP_LOGD(tag, fmt, ...) do {} while(0)
+    #define ESP_LOGE(tag, fmt, ...) do { Serial.printf("[ERROR][%s] " fmt "\n", tag, ##__VA_ARGS__);   Logger::_dispatch("ERROR", tag, fmt, ##__VA_ARGS__); } while(0)
+    #define ESP_LOGW(tag, fmt, ...) do { Serial.printf("[WARNING][%s] " fmt "\n", tag, ##__VA_ARGS__); Logger::_dispatch("WARN",  tag, fmt, ##__VA_ARGS__); } while(0)
+    #define ESP_LOGI(tag, fmt, ...) do { Serial.printf("[INFO][%s] " fmt "\n", tag, ##__VA_ARGS__);    Logger::_dispatch("INFO",  tag, fmt, ##__VA_ARGS__); } while(0)
+    #define ESP_LOGD(tag, fmt, ...) do { Serial.printf("[DEBUG][%s] " fmt "\n", tag, ##__VA_ARGS__); if (Logger::mqttDebugEnabled) Logger::_dispatch("DEBUG", tag, fmt, ##__VA_ARGS__); } while(0)
 
 #else
-    // Native test target: errors to stderr, rest suppressed
+    // Native test target: errors to stderr, rest suppressed. No sink dispatch — tests have no MQTT.
     #include <cstdio>
     #define ESP_LOGE(tag, fmt, ...) do { fprintf(stderr, "[ERROR][%s] " fmt "\n", tag, ##__VA_ARGS__); } while(0)
     #define ESP_LOGW(tag, fmt, ...) do {} while(0)
@@ -76,3 +98,39 @@
     #define ESP_LOGD(tag, fmt, ...) do {} while(0)
 
 #endif
+
+namespace Logger
+{
+    // Global handler — exactly one instance across all translation units (C++17 inline variable).
+    // nullptr by default: Logger works without a handler registered.
+    inline LogHandlerFn _logHandler{};
+
+    // Set to true to forward DEBUG messages to MQTT. Off by default — DEBUG is high-frequency
+    // and will flood the broker. Enable only when analyzing detailed runtime behaviour.
+    inline bool mqttDebugEnabled{false};
+
+    // Register a handler to forward log messages to (e.g. MQTT). Call once from setup().
+    inline void setLogHandler(LogHandlerFn handler)
+    {
+        _logHandler = std::move(handler);
+    }
+
+    // Remove the handler (e.g. before MQTT disconnect).
+    inline void clearLogHandler()
+    {
+        _logHandler = nullptr;
+    }
+
+    // Called by ESP_LOGE/I/W macros. Formats the message and forwards to the registered handler.
+    // Not intended to be called directly.
+    inline void _dispatch(const char* level, const char* tag, const char* fmt, ...)
+    {
+        if (!_logHandler) return;
+        char buf[256];
+        va_list args;
+        va_start(args, fmt);
+        vsnprintf(buf, sizeof(buf), fmt, args);
+        va_end(args);
+        _logHandler(level, tag, buf);
+    }
+}

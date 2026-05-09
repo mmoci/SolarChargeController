@@ -202,7 +202,7 @@ int ChargeController::computeDesiredSetpoint(MeasurementSnapshot snapshot)
         if (settled && m_wasChargingAllowed && !m_wasVoltageLimitActive)
         {
             m_mpptController.update(snapshot.pv);
-            m_mpptControl = softRampControl(m_mpptController.getRequestedOutput(), m_actuator->getMaxSoftStep());
+            m_mpptControl = softRampControl(m_mpptController.getRequestedOutput(), MpptController::MAX_STEP);
         }
     }
 

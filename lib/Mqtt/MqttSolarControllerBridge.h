@@ -21,6 +21,9 @@
  *   solar/{deviceId}/telemetry/{measurement}
  *   solar/{deviceId}/profile/{field}/state    ← published by controller (retained)
  *   solar/{deviceId}/profile/{field}/set      ← subscribed by controller (published by HA)
+ *   solar/{deviceId}/log                      ← published by logger (used for remote monitoring)
+ *   solar/{deviceId}/log/debug/set             ← subscribed; payload true/false enables MQTT debug forwarding
+ *   solar/{deviceId}/log/debug/state           ← published retained; reflects current debug enabled state
  *   homeassistant/{component}/{deviceId}/{objectId}/config  ← HA discovery
  */
 class MqttSolarControllerTopicBuilder
@@ -57,6 +60,11 @@ public:
     std::string prechargeVoltageSet()        const { return m_base + "/profile/precharge_voltage/set"; }
     std::string loadDisconnectVoltageSet()   const { return m_base + "/profile/load_disconnect_voltage/set"; }
     std::string maxChargingCurrentSet()      const { return m_base + "/profile/max_charging_current/set"; }
+
+    // Logging topics
+    std::string logTopic()                   const { return m_base + "/log"; }
+    std::string logDebugSet()                const { return m_base + "/log/debug/set"; }    // subscribe: payload true/false
+    std::string logDebugState()              const { return m_base + "/log/debug/state"; }  // publish retained: true/false
 
     // HomeAssistant MQTT Discovery topic
     // Pattern: homeassistant/{component}/{deviceId}/{objectId}/config
@@ -109,6 +117,14 @@ public:
      */
     void publishTelemetry(const MeasurementsIf& pvMeas, const MeasurementsIf& battMeas, BatteryManager::Mode  mode, int mpptControl_pct, unsigned long duration_ms = TELEMETRY_PUBLISH_INTERVAL_MS);
 
+    /**
+     * @brief Publish log messages to the MQTT broker. Call from the Logger.
+     * 
+     * @param level   Log level (ERROR, WARNING, INFO, DEBUG)
+     * @param message Log message
+     */
+    void publishLog(const std::string& level, const std::string& tag, const std::string& message);
+
 private:
     // Called from onConnect — publishes all HA discovery config payloads (retained)
     void publishDiscovery();
@@ -125,6 +141,12 @@ private:
 
     // Helper: handles boilerplate for integer-valued commands
     void handleIntCommand(std::string_view name, std::string_view payload, std::function<BatteryProfileSelector::Result(int)> setter);
+
+    // Handles solar/{id}/log/debug/set — payload "true"/"false" toggles MQTT debug forwarding
+    void onMqttDebugSet(std::string_view payload);
+
+    // Publishes the current mqttDebugEnabled state to the retained state topic
+    void publishLogDebugState();
 
     static constexpr unsigned long TELEMETRY_PUBLISH_INTERVAL_MS = 5000; // Publish telemetry at most every 5 seconds to prevent flooding the broker and HA
 
