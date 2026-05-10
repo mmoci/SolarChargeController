@@ -2,6 +2,7 @@
 
 #include "MeasurementsIf.h"
 #include "ActuatorIf.h"
+#include "MpptStrategyIf.h"
 
 class Initializer
 {
@@ -11,6 +12,7 @@ class Initializer
     virtual void update() = 0;
     virtual MeasurementsIf& getPvMeasurements() = 0;
     virtual MeasurementsIf& getBatteryMeasurements() = 0;
+    virtual MpptStrategyIf& getMpptStrategy() = 0;
     virtual ActuatorIf& getActuator() = 0;
     virtual ~Initializer() = default;
 

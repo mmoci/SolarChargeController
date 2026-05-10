@@ -4,6 +4,7 @@
 #include "PwmDcConverter.h"
 #include "SensorINA226.h"
 #include "Config.h"
+#include "PerturbAndObserveMppt.h"
 
 class InitializerPwm : public Initializer
 {
@@ -13,6 +14,7 @@ class InitializerPwm : public Initializer
     MeasurementsIf& getPvMeasurements() override;
     MeasurementsIf& getBatteryMeasurements() override;
     ActuatorIf& getActuator() override;
+    MpptStrategyIf& getMpptStrategy() override;
 
     private:
     static constexpr uint8_t I2C_SDA_PIN {21};
@@ -22,4 +24,5 @@ class InitializerPwm : public Initializer
     PwmDcConverter pwmActuator{PWM_PIN};
     SensorINA226 pvSensor{SensorConfig::PV_SENSOR_DEVICE_ADDRESS, SensorConfig::SensorINA226::PV_SHUNT_mOhm};
     SensorINA226 batterySensor{SensorConfig::BATTERY_SENSOR_DEVICE_ADDRESS, SensorConfig::SensorINA226::BATTERY_SHUNT_mOhm};
+    PerturbAndObserveMppt pwmMpptStrategy{};
 };

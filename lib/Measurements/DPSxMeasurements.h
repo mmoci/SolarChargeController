@@ -22,11 +22,15 @@ class DPSxMeasurements : public MeasurementsIf
         m_measSource{measSource}
     {}
 
-
     int getVoltage_mV() const override 
     {
         return (m_measSource == MeasurementSource::Input) ? p_dpsConverter->getInVoltage_mV() : p_dpsConverter->getVoltage_mV();
     };
+
+    std::optional<int> getOpenCircuitVoltage_mV() const override
+    {
+        return p_dpsConverter->getOpenCircuitVoltage_mV();
+    }
 
     /**
      * On DPS5005 in series circuit topology:

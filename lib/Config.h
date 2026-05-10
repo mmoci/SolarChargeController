@@ -34,6 +34,17 @@ namespace ChargeControllerConfig
     
 }
 
+namespace PvArrayConfig
+{
+    // 44V, Default absolute maximum open-circuit voltage expected from the PV source. 
+    // This is a fallback value used if the PV sensor fails to provide a valid reading. 
+    // It should be set conservatively high to avoid clipping the true OCV, but not so 
+    // high as to allow an invalid reading to cause damage. 
+    // For a 12V nominal panel with Voc ~22V, 44V provides a safe margin while still 
+    // protecting against wildly invalid readings.
+    static constexpr int DEFAULT_OPEN_CIRCUIT_VOLTAGE_mV {44000};  
+}
+
 namespace BatteryConfig
 {
     enum class BatteryType 

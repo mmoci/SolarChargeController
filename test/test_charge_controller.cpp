@@ -2,7 +2,21 @@
 #include "ChargeController.h"
 #include "MockMeasurements.h"
 #include "MockActuator.h"
+#include "MpptStrategyIf.h"
 #include "Config.h"
+
+// Minimal MPPT strategy mock that ramps control by 1 each update() call
+class MockMpptStrategy : public MpptStrategyIf
+{
+public:
+    void init() override { m_control = MIN_CONTROL_VALUE; m_updateCount = 0; }
+    void update(Measurements /*m*/) override { m_control = std::min(m_control + 1, MAX_CONTROL_VALUE); ++m_updateCount; }
+    int getMpptControl() const override { return m_control; }
+    int getUpdateCount() const { return m_updateCount; }
+private:
+    int m_control{MIN_CONTROL_VALUE};
+    int m_updateCount{};
+};
 
 class ChargeControllerTest : public ::testing::Test
 {
@@ -10,7 +24,8 @@ protected:
     MockMeasurements pvMeasurements;
     MockMeasurements batteryMeasurements;
     MockActuator actuator;
-    ChargeController controller{&pvMeasurements, &batteryMeasurements, &actuator};
+    MockMpptStrategy mpptStrategy;
+    ChargeController controller{&pvMeasurements, &batteryMeasurements, &actuator, &mpptStrategy};
     
     void SetUp() override
     {
@@ -137,7 +152,7 @@ TEST_F(ChargeControllerTest, ControlRampsSmootly)
     for(size_t i = 1; i < controlValues.size(); ++i)
     {
         int delta = std::abs(controlValues[i] - controlValues[i-1]);
-        EXPECT_LE(delta, actuator.getMaxSoftStep() + 1);
+        EXPECT_LE(delta, MpptStrategyIf::MAX_STEP + 1);
     }
 }
 
@@ -213,23 +228,33 @@ TEST_F(ChargeControllerTest, HandlesRapidPvChanges)
 // Test MPPT only perturbs when measurementAge reports a new hardware read
 TEST_F(ChargeControllerTest, MpptOnlyPerturbs_WhenNewMeasurementArrives)
 {
+    MockMpptStrategy mppt;
+    MockMeasurements pv;
+    MockMeasurements batt;
+    MockActuator act;
+    ChargeController ctrl{&pv, &batt, &act, &mppt};
+    ctrl.init();
+
+    batt.setVoltage_mV(11000);
+    batt.setCurrent_mA(1000);
+    pv.setVoltage_mV(18000);
+    pv.setCurrent_mA(5000);
+
     // Static timestamp: same measurement repeated (no new hardware read)
-    pvMeasurements.setLastUpdate(100);
-    pvMeasurements.setVoltage_mV(18000);
-    pvMeasurements.setCurrent_mA(5000);
+    pv.setLastUpdate(100);
 
     // First call: m_lastPvUpdateAge==0 -> perturbs unconditionally, sets m_lastPvUpdateAge=100
-    controller.update();
-    int controlAfterFirst = actuator.getLastControl();
+    ctrl.update();
+    int updatesAfterFirst = mppt.getUpdateCount();
 
     // Second call: pvUpdateAge=100, m_lastPvUpdateAge=100 -> 100<100 false, 100==0 false -> no perturb
-    controller.update();
-    EXPECT_EQ(actuator.getLastControl(), controlAfterFirst);
+    ctrl.update();
+    EXPECT_EQ(mppt.getUpdateCount(), updatesAfterFirst); // no new perturb
 
     // New measurement arrived: pvUpdateAge=5 < m_lastPvUpdateAge=100 -> perturbs
-    pvMeasurements.setLastUpdate(5);
-    controller.update();
-    EXPECT_NE(actuator.getLastControl(), controlAfterFirst);
+    pv.setLastUpdate(5);
+    ctrl.update();
+    EXPECT_GT(mppt.getUpdateCount(), updatesAfterFirst); // one more perturb
 }
 
 // Test that BatteryManager is not updated when battery measurements are stale.

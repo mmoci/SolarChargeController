@@ -18,15 +18,17 @@ void DPSxDcConverter::init()
     // Enqueue initial writes to ensure a known safe state on startup: output disabled, OCP ceiling set, and U_SET at a safe voltage. 
     // These are processed with priority over any new control writes that arrive around the same time, so the DPS is guaranteed to start in a safe state.
     m_writeRequestQueue = {}; // Clear any pending writes that might be in the queue from a previous run (e.g. after a soft reset triggered by the watchdog)
-    enqueWriteRequest(Register::ON_OFF, 0, true); // Ensure the OFF command is sent first to prioritize safety on startup
+    enableOutput(false, true); // Ensure the OFF command is sent first to prioritize safety on startup
     enqueWriteRequest(Register::I_SET, static_cast<uint16_t>(DPSxDcConverterConfig::MAX_MPPT_CURRENT_CONTROL_VALUE));
     enqueWriteRequest(Register::U_SET, static_cast<uint16_t>(m_uSetVoltage_bits));
     
     m_errorRecoveryTimer.reset();
     m_messageTimer.reset();
     m_startupTimer.trigger(); // trigger (not reset) so update() actually advances duration
+    m_openCircuitVoltageTimer.trigger();
 
     m_startupComplete = false;
+    m_ocvRefreshDisabledOutput = false;
 }
 
 void DPSxDcConverter::update()
@@ -35,7 +37,10 @@ void DPSxDcConverter::update()
     {
         m_startupTimer.update();
         if (m_startupTimer.getDuration() < DPSxDcConverterConfig::STARTUP_DELAY_MS)
+        {
+            updateOpenCircuitVoltage();
             return;
+        }
         clearRxLine(); // flush any UART garbage accumulated during ESP32 boot
         m_startupComplete = true;
     }
@@ -53,6 +58,7 @@ void DPSxDcConverter::update()
     }
 
     handleModbusMessages();
+    updateOpenCircuitVoltage();
 }
 
 void DPSxDcConverter::enableOutput(bool enable, bool priority)
@@ -79,6 +85,33 @@ void DPSxDcConverter::applyControl(int controlValue)
     {
         m_setPointValue = setPointValue;
         enqueWriteRequest(selectRegisterType(), static_cast<uint16_t>(m_setPointValue));
+    }
+}
+
+void DPSxDcConverter::updateOpenCircuitVoltage()
+{
+    m_openCircuitVoltageTimer.update();
+    if (m_openCircuitVoltageTimer.getDuration() >= DPSxDcConverterConfig::OPEN_CIRCUIT_VOLTAGE_REFRESH_RATE_MS)
+    {
+        m_ocvRefreshDisabledOutput = m_outputEnabled; // remember whether we were charging before cutting output
+        enableOutput(false, true);                    // urgent OFF to let Vin rise to Voc before sampling
+        m_openCircuitVoltageTimer.trigger();
+    }
+
+    // Require Vin to be above the battery voltage by at least 1V (rules out battery bleedthrough when
+    // output is off and battery is connected), AND above 5V absolute (rules out noise when battery is absent).
+    const bool panelPresent = (m_inVoltage_mV > std::max(m_outVoltage_mV, 5000) + 1000);
+    if (!isOutputEnabled() && hasMeasurements() && panelPresent && m_openCircuitVoltageTimer.getDuration() >= 500)
+    {
+        m_openCircuitVoltage_mV = getInVoltage_mV();
+        ESP_LOGI(TAG, "Open-circuit voltage refreshed: %dmV", m_openCircuitVoltage_mV);
+        m_openCircuitVoltageTimer.trigger();
+
+        if (m_ocvRefreshDisabledOutput) // re-enable output only if we were the ones who cut it
+        {
+            m_ocvRefreshDisabledOutput = false;
+            enableOutput(true);
+        }
     }
 }
 

@@ -4,6 +4,7 @@ void InitializerDps::init()
 {
     Serial2.begin(9600, SERIAL_8N1, SERIAL2_RX_PIN, SERIAL2_TX_PIN);
     dpsDcConverter.init();
+    dpsMpptStrategy.init();
 }
 
 void InitializerDps::update()
@@ -28,4 +29,9 @@ ActuatorIf& InitializerDps::getActuator()
 {
     // Return reference to the DPS-specific actuator (DC converter)
     return dpsDcConverter;
+}
+
+MpptStrategyIf& InitializerDps::getMpptStrategy()
+{
+    return dpsMpptStrategy;
 }

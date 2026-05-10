@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <vector>
 #include <deque>
 #include "Device.h"
@@ -64,6 +65,9 @@ namespace DPSxDcConverterConfig
     static constexpr int OVP_CEILING_HEADROOM_BITS       {50};   // 50 × 0.01V/bit = 0.50V above battery maxVoltage
     static constexpr uint16_t ERROR_RECOVERY_TMO         {10000}; // ms — pause duration after too many errors
     static constexpr uint8_t  CONSECUTIVE_ERRORS_THRESHOLD {5};   // errors before triggering recovery pause
+
+    // Refresh open-circuit voltage every 30 minutes when measurements are valid, to adapt to changing panel conditions
+    static constexpr unsigned long OPEN_CIRCUIT_VOLTAGE_REFRESH_RATE_MS {30 * 60 * 1000};
 }
 
 /**
@@ -89,11 +93,12 @@ class DPSxDcConverter : public Device, public ActuatorIf
     bool hasMeasurements() const override;
     void enableOutput(bool enable, bool priority = false) override;
     void applyControl(int controlValue) override;
-    
+    std::optional<int> getOpenCircuitVoltage_mV() const { return m_openCircuitVoltage_mV; }
     int getInVoltage_mV() const {return m_inVoltage_mV;}
     int getVoltage_mV() const {return m_outVoltage_mV;};
     int getCurrent_mA() const {return m_outCurrent_mA;};
     unsigned long getLastUpdateTime() const {return m_lastUpdateTime;};
+    bool isOutputEnabled() const {return m_outputEnabled;}
 
     private:
     enum class Register : uint16_t
@@ -150,6 +155,8 @@ class DPSxDcConverter : public Device, public ActuatorIf
     int m_outVoltage_mV{};
     int m_outCurrent_mA{};
     int m_setPointValue{};
+    std::optional<int> m_openCircuitVoltage_mV{};  // nullopt until first valid Voc capture
+    bool m_ocvRefreshDisabledOutput{false};        // true when the 30-min timer forced output off; triggers re-enable after capture
     ModbusState m_messageState{};
     ModbusMessageType m_activeMessageType{};
     Register m_activeWriteRegister{}; 
@@ -160,6 +167,7 @@ class DPSxDcConverter : public Device, public ActuatorIf
     uint8_t m_readsSinceLastWrite{};
     Timer m_messageTimer{};
     Timer m_startupTimer{};
+    Timer m_openCircuitVoltageTimer{};
     std::deque<WriteRequest> m_writeRequestQueue{};
 
     // ===== Error Recovery Variables =====
@@ -185,6 +193,12 @@ class DPSxDcConverter : public Device, public ActuatorIf
      * @param urgent Whether the request is urgent and should be prioritized.
      */
     void enqueWriteRequest(Register address, uint16_t data, bool urgent = false);
+
+    /**
+     * @brief Updates the open-circuit voltage measurement. This should be called periodically to ensure the OCV value is current.
+     *        The DPS output is temporarily disabled during the measurement to allow the voltage to stabilize.
+     */
+    void updateOpenCircuitVoltage();
 
     /**
      * @brief Synchronous, blocking with timeout is the correct first design...

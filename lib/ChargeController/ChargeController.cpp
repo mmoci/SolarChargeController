@@ -27,7 +27,10 @@ void ChargeController::init()
         m_actuator->setBatteryProfile(BatteryConfig::LI_ION_3S_DEFAULT);
     }
 
-    m_mpptController.init();
+    // Actuator and corresponding MPPT strategy are already initialized by Initializer with a default profile, 
+    // so we can call init() on the strategy now that the profile is set.
+    if(m_mpptStrategy)
+        m_mpptStrategy->init();
 }
 
 void ChargeController::update()
@@ -108,7 +111,7 @@ void ChargeController::handleChargingStateChange(bool isChargingAllowed)
 {
     if (!m_wasChargingAllowed && isChargingAllowed)
     {
-        m_mpptController.init();
+        m_mpptStrategy->init();
         m_actuator->enableOutput(true); // Enable output on every charge-start transition (startup, recharge after full battery, etc.)
         ESP_LOGI(TAG, "Charging started — MPPT reset to initial state");
     }
@@ -126,30 +129,11 @@ void ChargeController::handleVoltageLimitStateChange(bool isVoltageLimitActive)
     const bool cvReleased = m_wasVoltageLimitActive && !isVoltageLimitActive;
     if (cvReleased && m_wasChargingAllowed) // m_wasChargingAllowed already updated by handleChargingStateChange
     {
-        m_mpptController.init();
+        m_mpptStrategy->init();
         m_voltageIntegralError = 0;
         ESP_LOGI(TAG, "CV limit released — MPPT reset to initial state");
     }
     m_wasVoltageLimitActive = isVoltageLimitActive;
-}
-
-void ChargeController::handlePvCollapse(int pvVoltage_mV, int battVoltage_mV)
-{
-    if(m_mpptController.isPvPowerCollapsing() && !m_collapsingRecoveryRequested)
-    {
-        ESP_LOGW(TAG, "PV collapse detected (Vin=%dmV Vbatt=%dmV) — disabling output", pvVoltage_mV, battVoltage_mV);
-        m_actuator->enableOutput(false, true); // Urgent: preempts queue to immediately cut DPS output
-        m_collapsingRecoveryRequested = true;
-    }
-    else if(m_collapsingRecoveryRequested && m_actuator->areMeasurementsSettled())
-    {
-        // DPS has processed the disable and settled. Apply the backed-off I_SET first,
-        // then enable: FIFO queue ordering ensures I_SET reaches DPS before ON_OFF=1.
-        m_actuator->applyControl(m_mpptController.getRequestedOutput());
-        m_actuator->enableOutput(true); // Non-urgent: goes behind I_SET in the write queue
-        m_collapsingRecoveryRequested = false;
-        ESP_LOGI(TAG, "PV collapse recovery complete — output re-enabled at %d%%", m_mpptController.getRequestedOutput());
-    }
 }
 
 ChargeController::MeasurementSnapshot ChargeController::sampleMeasurements()
@@ -157,6 +141,14 @@ ChargeController::MeasurementSnapshot ChargeController::sampleMeasurements()
     MeasurementSnapshot snapshot{};
     snapshot.pv.voltage_mV = m_pvMeasurements->getVoltage_mV();
     snapshot.pv.current_mA = m_pvMeasurements->getCurrent_mA();
+
+    auto pvOpenCircuitVoltageOpt = m_pvMeasurements->getOpenCircuitVoltage_mV();
+    if(pvOpenCircuitVoltageOpt.has_value())
+    {
+        snapshot.pvOpenCircuitVoltage_mV = pvOpenCircuitVoltageOpt.value();
+        m_mpptStrategy->setOpenCircuitVoltage(snapshot.pvOpenCircuitVoltage_mV);
+    }
+    
     snapshot.battery.voltage_mV = m_batteryMeasurements->getVoltage_mV();
     snapshot.battery.current_mA = m_batteryMeasurements->getCurrent_mA();
     snapshot.pvValid      = m_pvMeasurements->isMeasurementValid();
@@ -196,13 +188,10 @@ int ChargeController::computeDesiredSetpoint(MeasurementSnapshot snapshot)
     if (snapshot.updated)
     {
         const bool settled = m_actuator->areMeasurementsSettled();
-        if (settled)
-            handlePvCollapse(snapshot.pv.voltage_mV, snapshot.battery.voltage_mV);
-
         if (settled && m_wasChargingAllowed && !m_wasVoltageLimitActive)
         {
-            m_mpptController.update(snapshot.pv);
-            m_mpptControl = softRampControl(m_mpptController.getRequestedOutput(), MpptController::MAX_STEP);
+            m_mpptStrategy->update(snapshot.pv);
+            m_mpptControl = softRampControl(m_mpptStrategy->getMpptControl(), m_mpptStrategy->getMaxSoftRampStep());
         }
     }
 

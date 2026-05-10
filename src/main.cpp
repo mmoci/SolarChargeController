@@ -1,7 +1,6 @@
 #include "ChargeController.h"
 #include "BatteryProfileSelector.h"
 #include "Initializer.h"
-#include "MqttClient.h"
 #include "MqttSolarControllerBridge.h"
 #include "OtaHandler.h"
 #include "Utility.h"
@@ -43,6 +42,7 @@ ChargeController controller{
     &Initializer::getInstance().getPvMeasurements(),
     &Initializer::getInstance().getBatteryMeasurements(),
     &Initializer::getInstance().getActuator(),
+    &Initializer::getInstance().getMpptStrategy(),
     &profileSelector};
 
 #ifdef MQTT_CLIENT
@@ -57,6 +57,7 @@ void setup()
     esp_log_level_set("*", ESP_LOG_DEBUG);
     #endif
 
+    ESP_LOGI("BOOT", "Reset reason: %d", (int)esp_reset_reason());
     ESP_LOGI(TAG, "setup() start");
 
     #ifdef MQTT_CLIENT

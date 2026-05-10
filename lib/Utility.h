@@ -46,6 +46,7 @@ struct Measurements
 {
     int voltage_mV{};
     int current_mA{};
+    std::optional<int> openCircuitVoltage_mV{}; // Optional open-circuit voltage measurement, not all sensors provide this
 };
 
 inline bool parseIntSafe(std::string_view str, int& out)

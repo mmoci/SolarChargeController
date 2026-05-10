@@ -6,6 +6,7 @@ void InitializerPwm::init()
     pvSensor.init();
     batterySensor.init();
     pwmActuator.init();
+    pwmMpptStrategy.init();
 }
 
 void InitializerPwm::update()
@@ -28,4 +29,9 @@ MeasurementsIf& InitializerPwm::getBatteryMeasurements()
 ActuatorIf& InitializerPwm::getActuator()
 {
     return pwmActuator;
+}
+
+MpptStrategyIf& InitializerPwm::getMpptStrategy()
+{
+    return pwmMpptStrategy;
 }

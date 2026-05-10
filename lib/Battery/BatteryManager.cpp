@@ -70,7 +70,8 @@ void BatteryManager::updateBatteryProfile(const BatteryProfile& profile)
 
 void BatteryManager::handleIdleMode(const Measurements& batteryMeasurements, bool chargingAvailable)
 {
-    auto& [batteryVoltage, batteryCurrent] = batteryMeasurements;
+    const int batteryVoltage = batteryMeasurements.voltage_mV;
+    const int batteryCurrent = batteryMeasurements.current_mA;
 
     if(batteryVoltage <= m_profile.minSafeVoltage_mV) 
     {
@@ -88,7 +89,8 @@ void BatteryManager::handleIdleMode(const Measurements& batteryMeasurements, boo
 
 void BatteryManager::handlePrechargeMode(const Measurements& batteryMeasurements, bool chargingAvailable)
 {
-    auto& [batteryVoltage, batteryCurrent] = batteryMeasurements;
+    const int batteryVoltage = batteryMeasurements.voltage_mV;
+    const int batteryCurrent = batteryMeasurements.current_mA;
 
     if(batteryVoltage <= m_profile.minSafeVoltage_mV)
     {   
@@ -106,7 +108,8 @@ void BatteryManager::handlePrechargeMode(const Measurements& batteryMeasurements
 
 void BatteryManager::handleCcMode(const Measurements& batteryMeasurements, bool chargingAvailable)
 {
-    auto& [batteryVoltage, batteryCurrent] = batteryMeasurements;
+    const int batteryVoltage = batteryMeasurements.voltage_mV;
+    const int batteryCurrent = batteryMeasurements.current_mA;
 
     if(batteryVoltage <= m_profile.minSafeVoltage_mV)
     {   
@@ -124,7 +127,8 @@ void BatteryManager::handleCcMode(const Measurements& batteryMeasurements, bool 
 
 void BatteryManager::handleCvMode(const Measurements& batteryMeasurements, bool chargingAvailable)
 {
-    auto& [batteryVoltage, batteryCurrent] = batteryMeasurements;
+    const int batteryVoltage = batteryMeasurements.voltage_mV;
+    const int batteryCurrent = batteryMeasurements.current_mA;
 
     if(batteryVoltage <= m_profile.minSafeVoltage_mV || batteryVoltage > (m_profile.maxVoltage_mV * 105) / 100)
     {   
@@ -142,7 +146,8 @@ void BatteryManager::handleCvMode(const Measurements& batteryMeasurements, bool 
 
 void BatteryManager::handleDoneMode(const Measurements& batteryMeasurements, bool chargingAvailable)
 {
-    auto& [batteryVoltage, batteryCurrent] = batteryMeasurements;
+    const int batteryVoltage = batteryMeasurements.voltage_mV;
+    const int batteryCurrent = batteryMeasurements.current_mA;
     
     if(batteryVoltage <= m_profile.minSafeVoltage_mV || batteryVoltage > (m_profile.maxVoltage_mV * 105) / 100)
     {   

@@ -2,7 +2,7 @@
 #include <memory>
 #include "MeasurementsIf.h" 
 #include "ActuatorIf.h"
-#include "MpptController.h"
+#include "MpptStrategyIf.h"
 #include "BatteryManager.h"
 #include "BatteryProfileSelector.h"
 #include "Config.h"
@@ -10,10 +10,11 @@
 class ChargeController
 {
     public:
-    ChargeController(MeasurementsIf* pvMeasurements, MeasurementsIf* batteryMeasurements, ActuatorIf* actuator, BatteryProfileSelector* profileSelector = nullptr) :
+    ChargeController(MeasurementsIf* pvMeasurements, MeasurementsIf* batteryMeasurements, ActuatorIf* actuator, MpptStrategyIf* mpptStrategy, BatteryProfileSelector* profileSelector = nullptr) :
         m_pvMeasurements{pvMeasurements},
         m_batteryMeasurements{batteryMeasurements},
         m_actuator{actuator},
+        m_mpptStrategy{mpptStrategy},
         m_profileSelector{profileSelector}
     {}
 
@@ -29,13 +30,14 @@ class ChargeController
     MeasurementsIf*          m_batteryMeasurements{};
     ActuatorIf*              m_actuator{};
     BatteryProfileSelector*  m_profileSelector{};
+    MpptStrategyIf*          m_mpptStrategy{};
     BatteryManager           m_batteryManager{};
-    MpptController           m_mpptController{};
 
     struct MeasurementSnapshot
     {
         Measurements pv{};
         Measurements battery{};
+        int pvOpenCircuitVoltage_mV{};
         bool pvValid{false};      // PV measurement is within stale timeout
         bool batteryValid{false}; // Battery measurement is within stale timeout
         bool updated{false};      // New PV reading arrived this cycle (implies pvValid)
@@ -62,15 +64,11 @@ class ChargeController
     // the panel was unloaded.
     bool m_wasVoltageLimitActive{false};
 
-    // Tracks whether we've detected a PV collapse and requested recovery.
-    bool m_collapsingRecoveryRequested{false};
-
     bool updatePvAvailability(Measurements pvMeasurements, Measurements batteryMeasurements);
     int clampLimitPI(int measured, int limit, int mpptControl, long& integralError);
     int softRampControl(int targetControl, int stepSize);
     void handleChargingStateChange(bool chargingAllowed);
     void handleVoltageLimitStateChange(bool isVoltageLimitActive);
-    void handlePvCollapse(int pvVoltage_mV, int battVoltage_mV);
     MeasurementSnapshot sampleMeasurements();
     int computeDesiredSetpoint(MeasurementSnapshot snapshot);
     int applyLimitConstraints(int desiredSetpoint, MeasurementSnapshot snapshot);
