@@ -169,7 +169,7 @@ protected:
     InputVoltageRegulationMppt mppt;
 
     static constexpr int TEST_OCV_mV  = 20000;              // convenient test OCV
-    static constexpr int TEST_VMPP_mV = (TEST_OCV_mV * 76) / 100; // 15200 mV
+    static constexpr int TEST_VMPP_mV = (TEST_OCV_mV * PvArrayConfig::INITIAL_MPPT_VOLTAGE_PERCENT) / 100; // 16800 mV at 84%
 
     void SetUp() override { mppt.init(); }
 };
@@ -177,7 +177,6 @@ protected:
 TEST_F(InputVoltageRegulationMpptTest, InitialState)
 {
     EXPECT_EQ(mppt.getMpptControl(), MpptStrategyIf::MIN_CONTROL_VALUE);
-    EXPECT_EQ(mppt.getMpptStep(),    MpptStrategyIf::DEFAULT_STEP);
 }
 
 // After init(), Vmpp = DEFAULT_OCV × 76%.  Vin exactly at that target → zero
@@ -203,8 +202,8 @@ TEST_F(InputVoltageRegulationMpptTest, SetOpenCircuitVoltage_ZeroIgnored)
     mppt.setOpenCircuitVoltage(0);           // must be rejected
 
     // If 0 were accepted, m_mpptVoltage = 0 and update() returns early → control stays 0.
-    // If rejected, Vmpp = 15200 and Vin = 16000 gives correction = int(0.005 * 800) = 4.
-    mppt.update({16000, 1000});
+    // If rejected, Vmpp = TEST_VMPP_mV and Vin = TEST_VMPP_mV+1200 gives a positive error → correction > 0.
+    mppt.update({TEST_VMPP_mV + 1200, 1000});
     EXPECT_GT(mppt.getMpptControl(), MpptStrategyIf::MIN_CONTROL_VALUE);
 }
 
@@ -225,9 +224,9 @@ TEST_F(InputVoltageRegulationMpptTest, SetOpenCircuitVoltage_SameValueIgnored)
 
 TEST_F(InputVoltageRegulationMpptTest, ControlIncreasesWhenVinAboveVmpp)
 {
-    mppt.setOpenCircuitVoltage(TEST_OCV_mV); // Vmpp = 15200
-    // error = 16000 - 15200 = 800 mV → correction = int(0.005 * 800) = 4
-    mppt.update({16000, 1000});
+    mppt.setOpenCircuitVoltage(TEST_OCV_mV); // Vmpp = TEST_VMPP_mV
+    // error = (TEST_VMPP_mV+1200) - TEST_VMPP_mV = 1200 mV → correction = int(0.005 * 1200) = 6
+    mppt.update({TEST_VMPP_mV + 1200, 1000});
     EXPECT_GT(mppt.getMpptControl(), MpptStrategyIf::MIN_CONTROL_VALUE);
 }
 
@@ -264,8 +263,8 @@ TEST_F(InputVoltageRegulationMpptTest, ControlClampsToMinimum)
     EXPECT_GE(mppt.getMpptControl(), MpptStrategyIf::MIN_CONTROL_VALUE);
 }
 
-// IVR bypasses the soft ramp so the charge controller can respond aggressively.
-TEST_F(InputVoltageRegulationMpptTest, GetMaxSoftRampStep_BypassesSoftRamp)
+// IVR uses a conservative step of 2% to prevent overshooting panel Isc at low irradiance.
+TEST_F(InputVoltageRegulationMpptTest, GetMaxSoftRampStep_ReturnsTwoPercentStep)
 {
-    EXPECT_EQ(mppt.getMaxSoftRampStep(), MpptStrategyIf::MAX_CONTROL_VALUE);
+    EXPECT_EQ(mppt.getMaxSoftRampStep(), 2);
 }

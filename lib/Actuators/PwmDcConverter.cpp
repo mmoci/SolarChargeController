@@ -18,9 +18,9 @@ void PwmDcConverter::init()
     ledcAttachPin(m_pin, m_ledChannel);
 
     #ifdef ESP32
-    ledcWrite(m_ledChannel, 0); // For safty reason
+    ledcWrite(m_ledChannel, 0); // For safety reason
     #elif defined(ESP8266)
-    analogWrite(m_pwmPin, 0); // For safty reason
+    analogWrite(m_pin, 0); // For safety reason
     #endif
 }
 
@@ -56,6 +56,11 @@ void PwmDcConverter::enableOutput(bool enable, bool priority)
         applyControl(PwmDcConverterConfig::DEFAULT_MPPT_CONTROL_VALUE); 
     else
         applyControl(0);
+}
+
+bool PwmDcConverter::isOutputEnabled() const
+{
+    return m_pwm > 0;
 }
 
 void PwmDcConverter::applyControl(int controlValue)

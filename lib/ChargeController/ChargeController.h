@@ -64,12 +64,18 @@ class ChargeController
     // the panel was unloaded.
     bool m_wasVoltageLimitActive{false};
 
+    // Tracks the settled output-enabled state from the previous cycle.
+    // Used to detect OFF→ON transitions (external re-enable or OCV recovery) so MPPT
+    // can be reset before the first update, preventing stale high I_SET from before
+    // the output was off from being applied immediately on re-enable.
+    bool m_wasOutputEnabled{false};
+
     bool updatePvAvailability(Measurements pvMeasurements, Measurements batteryMeasurements);
     int clampLimitPI(int measured, int limit, int mpptControl, long& integralError);
     int softRampControl(int targetControl, int stepSize);
-    void handleChargingStateChange(bool chargingAllowed);
-    void handleVoltageLimitStateChange(bool isVoltageLimitActive);
+    void handleBatteryChargingStates(bool chargingAllowed, bool isVoltageLimitActive);
     MeasurementSnapshot sampleMeasurements();
     int computeDesiredSetpoint(MeasurementSnapshot snapshot);
     int applyLimitConstraints(int desiredSetpoint, MeasurementSnapshot snapshot);
+    void resetMpptStrategy();
 };

@@ -12,23 +12,23 @@ void DPSxDcConverter::init()
     m_lastUpdateTime      = 0;
     m_consecutiveErrors   = 0;
     m_pauseRetrying       = false;
-    m_outputEnabled       = false;
+    m_outputState         = OutputState::OFF;
     m_setPointValue       = DPSxDcConverterConfig::MAX_MPPT_CURRENT_CONTROL_VALUE;
 
     // Enqueue initial writes to ensure a known safe state on startup: output disabled, OCP ceiling set, and U_SET at a safe voltage. 
     // These are processed with priority over any new control writes that arrive around the same time, so the DPS is guaranteed to start in a safe state.
     m_writeRequestQueue = {}; // Clear any pending writes that might be in the queue from a previous run (e.g. after a soft reset triggered by the watchdog)
-    enableOutput(false, true); // Ensure the OFF command is sent first to prioritize safety on startup
+    enqueWriteRequest(Register::ON_OFF, 0, true); // Force output OFF on startup regardless of current hardware state (DPS retains state across ESP32 resets)
     enqueWriteRequest(Register::I_SET, static_cast<uint16_t>(DPSxDcConverterConfig::MAX_MPPT_CURRENT_CONTROL_VALUE));
     enqueWriteRequest(Register::U_SET, static_cast<uint16_t>(m_uSetVoltage_bits));
     
     m_errorRecoveryTimer.reset();
     m_messageTimer.reset();
-    m_startupTimer.trigger(); // trigger (not reset) so update() actually advances duration
+    m_startupTimer.trigger();
     m_openCircuitVoltageTimer.trigger();
 
     m_startupComplete = false;
-    m_ocvRefreshDisabledOutput = false;
+    m_ocvRefreshPending = false;
 }
 
 void DPSxDcConverter::update()
@@ -63,10 +63,13 @@ void DPSxDcConverter::update()
 
 void DPSxDcConverter::enableOutput(bool enable, bool priority)
 {
-    if (enable == m_outputEnabled)
-        return; // Already in the desired state — no write needed, no log spam
-    m_outputEnabled = enable;
-    enqueWriteRequest(Register::ON_OFF, static_cast<uint16_t>(m_outputEnabled), priority);
+    // Avoid redundant writes that would reset the DPS internal timer and cause unnecessary wear on the relay.
+    // State is confirmed by periodic reads, so this check may lag hardware reality by one read cycle (~450ms),
+    // but enqueWriteRequest deduplication ensures at most one pending write per register regardless.
+    if ((enable && m_outputState == OutputState::ON) || (!enable && m_outputState == OutputState::OFF))
+        return;
+
+    enqueWriteRequest(Register::ON_OFF, static_cast<uint16_t>(enable), priority);
     ESP_LOGI(TAG, "Output %s", enable ? "ENABLED" : "DISABLED");
 }
 
@@ -91,27 +94,27 @@ void DPSxDcConverter::applyControl(int controlValue)
 void DPSxDcConverter::updateOpenCircuitVoltage()
 {
     m_openCircuitVoltageTimer.update();
-    if (m_openCircuitVoltageTimer.getDuration() >= DPSxDcConverterConfig::OPEN_CIRCUIT_VOLTAGE_REFRESH_RATE_MS)
+
+    const bool panelPresent = (m_inVoltage_mV > std::max(m_outVoltage_mV, 5000) + 1000);
+    const bool hasLowOutputCurrent = hasMeasurements() && areMeasurementsSettled() && m_outCurrent_mA < 100;
+    
+    // Refresh open-circuit voltage if the timer has elapsed or if the panel is present but output current is very low
+    if (!m_ocvRefreshPending && m_outputState == OutputState::ON &&
+        ((m_openCircuitVoltageTimer.getDuration() >= DPSxDcConverterConfig::OPEN_CIRCUIT_VOLTAGE_REFRESH_RATE_MS) ||
+        (panelPresent && hasLowOutputCurrent && m_openCircuitVoltageTimer.getDuration() >= DPSxDcConverterConfig::LOW_POWER_OCV_COOLDOWN_MS))) 
     {
-        m_ocvRefreshDisabledOutput = m_outputEnabled; // remember whether we were charging before cutting output
-        enableOutput(false, true);                    // urgent OFF to let Vin rise to Voc before sampling
+        m_ocvRefreshPending = true; // Flag to indicate that an OCV refresh is pending
+        enableOutput(false, true);  // Urgent OFF to let Vin rise to Voc
         m_openCircuitVoltageTimer.trigger();
     }
 
-    // Require Vin to be above the battery voltage by at least 1V (rules out battery bleedthrough when
-    // output is off and battery is connected), AND above 5V absolute (rules out noise when battery is absent).
-    const bool panelPresent = (m_inVoltage_mV > std::max(m_outVoltage_mV, 5000) + 1000);
-    if (!isOutputEnabled() && hasMeasurements() && panelPresent && m_openCircuitVoltageTimer.getDuration() >= 500)
+    // Once output is disabled and measurements have settled, capture the open-circuit voltage and re-enable output
+    if (m_ocvRefreshPending && m_outputState == OutputState::OFF && areMeasurementsSettled())
     {
         m_openCircuitVoltage_mV = getInVoltage_mV();
         ESP_LOGI(TAG, "Open-circuit voltage refreshed: %dmV", m_openCircuitVoltage_mV);
-        m_openCircuitVoltageTimer.trigger();
-
-        if (m_ocvRefreshDisabledOutput) // re-enable output only if we were the ones who cut it
-        {
-            m_ocvRefreshDisabledOutput = false;
-            enableOutput(true);
-        }
+        m_ocvRefreshPending = false;
+        enableOutput(true);
     }
 }
 
@@ -220,14 +223,16 @@ void DPSxDcConverter::handleModbusMessages()
                 std::vector<uint16_t> buffer = receiveRegisterReadRsp(nrOfRegisters);
                 if(!buffer.empty())
                 {
-                    // UOUT/IOUT/UIN read registers: 0.01V/bit and 0.01A/bit → multiply by 10 to get mV / mA
+                    // UOUT/IOUT/UIN/ON_OFF read registers: 0.01V/bit, 0.001A/bit, 0.01V/bit, and bit 0 = ON/OFF, respectively
                     m_outVoltage_mV = buffer[0] * 10;
                     m_outCurrent_mA = buffer[1];  // Different resolution IOUT: 0.001A/bit → 1 bit = 1mA
                     m_inVoltage_mV  = buffer[3] * 10;
+                    m_outputState   = (buffer[7] & 0x0001) ? OutputState::ON : OutputState::OFF;
 
                     m_consecutiveErrors = 0; // Reset error count on successful read
                     m_lastUpdateTime = millis(); // Update last successful read time
-                    ESP_LOGD(TAG, "Read OK — Uout=%dmV Iout=%dmA Uin=%dmV", m_outVoltage_mV, m_outCurrent_mA, m_inVoltage_mV);
+                    ESP_LOGD(TAG, "Read OK — OutputState=%s Uout=%dmV Iout=%dmA Uin=%dmV", 
+                        m_outputState == OutputState::ON ? "ON" : "OFF", m_outVoltage_mV, m_outCurrent_mA, m_inVoltage_mV);
                     m_messageState = ModbusState::IDLE;
                     m_messageTimer.reset();
                     break;
@@ -292,6 +297,10 @@ void DPSxDcConverter::enqueWriteRequest(Register address, uint16_t data, bool ur
     else
         m_writeRequestQueue.push_back({address, data, urgent});
 }
+
+// ----------------------------------
+//  MODBUS RTU Communication Helpers
+// ----------------------------------
 
 std::size_t DPSxDcConverter::sendRegisterReadReq(Register startAddress, uint16_t nrOfRegisters, uint8_t slaveAddress)
 {

@@ -42,7 +42,9 @@ namespace PvArrayConfig
     // high as to allow an invalid reading to cause damage. 
     // For a 12V nominal panel with Voc ~22V, 44V provides a safe margin while still 
     // protecting against wildly invalid readings.
-    static constexpr int DEFAULT_OPEN_CIRCUIT_VOLTAGE_mV {44000};  
+    static constexpr int DEFAULT_OPEN_CIRCUIT_VOLTAGE_mV {49000};
+    // MPPT voltage as a percentage of open-circuit voltage, based on typical PV characteristics
+    static constexpr int INITIAL_MPPT_VOLTAGE_PERCENT{84};
 }
 
 namespace BatteryConfig

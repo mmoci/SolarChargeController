@@ -43,8 +43,7 @@ void ChargeController::update()
     if(measurementSnapshot.batteryValid)
         m_batteryManager.update(measurementSnapshot.battery, m_isPvAvailable);
 
-    handleChargingStateChange(m_batteryManager.isChargingAllowed());
-    handleVoltageLimitStateChange(m_batteryManager.isVoltageLimitActive());
+    handleBatteryChargingStates(m_batteryManager.isChargingAllowed(), m_batteryManager.isVoltageLimitActive());
 
     if (!m_batteryManager.isChargingAllowed())
         return;
@@ -98,40 +97,37 @@ int ChargeController::clampLimitPI(int measured, int limit, int mpptControl, lon
     return constrain(mpptControl - mpptControlCorrection, 0, 100);
 }
 
-int ChargeController::softRampControl(int targetControl, int stepSize)
+int ChargeController::softRampControl(int currentMpptControl, int stepSize)
 {
-    if(targetControl > m_mpptControl)
-            return std::min(targetControl, m_mpptControl + stepSize);
-    else if(targetControl < m_mpptControl)
-            return std::max(targetControl, m_mpptControl - stepSize);
-    return targetControl;
+    if(currentMpptControl > m_mpptControl)
+            return std::min(currentMpptControl, m_mpptControl + stepSize);
+    else if(currentMpptControl < m_mpptControl)
+            return currentMpptControl; // Allow immediate reductions in control to respond to rapidly changing conditions (e.g. cloud passing over panel)
+    return currentMpptControl;
 }
 
-void ChargeController::handleChargingStateChange(bool isChargingAllowed)
+void ChargeController::handleBatteryChargingStates(bool isChargingAllowed, bool isVoltageLimitActive)
 {
     if (!m_wasChargingAllowed && isChargingAllowed)
     {
-        m_mpptStrategy->init();
+        ESP_LOGI(TAG, "Battery charging started");
+        resetMpptStrategy();
         m_actuator->enableOutput(true); // Enable output on every charge-start transition (startup, recharge after full battery, etc.)
-        ESP_LOGI(TAG, "Charging started — MPPT reset to initial state");
     }
     else if (m_wasChargingAllowed && !isChargingAllowed)
     {
+        ESP_LOGI(TAG, "Battery charging stopped");
         m_actuator->enableOutput(false, true); // Urgent: preempt any pending writes to immediately cut output
         m_actuator->applyControl(0);           // Reset setpoint to 0 so MPPT restarts clean from 0% on next charge cycle
-        ESP_LOGI(TAG, "Charging stopped");
     }
     m_wasChargingAllowed = isChargingAllowed;
-}
 
-void ChargeController::handleVoltageLimitStateChange(bool isVoltageLimitActive)
-{
-    const bool cvReleased = m_wasVoltageLimitActive && !isVoltageLimitActive;
-    if (cvReleased && m_wasChargingAllowed) // m_wasChargingAllowed already updated by handleChargingStateChange
+    const bool isCvModeReleased = m_wasVoltageLimitActive && !isVoltageLimitActive;
+    if (isCvModeReleased && m_wasChargingAllowed) 
     {
-        m_mpptStrategy->init();
+        ESP_LOGI(TAG, "Battery CV mode limit released");
+        resetMpptStrategy();
         m_voltageIntegralError = 0;
-        ESP_LOGI(TAG, "CV limit released — MPPT reset to initial state");
     }
     m_wasVoltageLimitActive = isVoltageLimitActive;
 }
@@ -187,8 +183,18 @@ int ChargeController::computeDesiredSetpoint(MeasurementSnapshot snapshot)
 
     if (snapshot.updated)
     {
-        const bool settled = m_actuator->areMeasurementsSettled();
-        if (settled && m_wasChargingAllowed && !m_wasVoltageLimitActive)
+        const bool enabledOutput = m_actuator->isOutputEnabled() && m_actuator->areMeasurementsSettled();
+
+        // Detect output OFF→ON transition (external re-enable from front panel, or OCV recovery re-enable).
+        // Reset MPPT so stale frozen IVR state from before the OFF period is not applied immediately.
+        if (enabledOutput && !m_wasOutputEnabled && m_wasChargingAllowed)
+        {
+            ESP_LOGI(TAG, "Output re-enabled while charging allowed — resetting MPPT to prevent stale setpoint application");
+            resetMpptStrategy();
+        }
+        m_wasOutputEnabled = enabledOutput;
+
+        if (enabledOutput && m_wasChargingAllowed && !m_wasVoltageLimitActive)
         {
             m_mpptStrategy->update(snapshot.pv);
             m_mpptControl = softRampControl(m_mpptStrategy->getMpptControl(), m_mpptStrategy->getMaxSoftRampStep());
@@ -219,4 +225,13 @@ int ChargeController::applyLimitConstraints(int desiredSetpoint, MeasurementSnap
     }
 
     return limitedSetpoint;
+}
+
+void ChargeController::resetMpptStrategy()
+{
+    m_mpptStrategy->init();
+    auto ocvOpt = m_pvMeasurements->getOpenCircuitVoltage_mV();
+    if (ocvOpt.has_value())
+        m_mpptStrategy->setOpenCircuitVoltage(ocvOpt.value());
+    ESP_LOGI(TAG, "MPPT reset, new OCV=%dmV", ocvOpt.value_or(-1));
 }

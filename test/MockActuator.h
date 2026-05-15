@@ -24,7 +24,7 @@ public:
     // Getters for testing
     int getLastControl() const { return m_lastControl; }
     void resetLastControl() { m_lastControl = -1; }
-    bool isOutputEnabled() const { return m_outputEnabled; }
+    bool isOutputEnabled() const override { return m_outputEnabled; }
 
 private:
     int m_lastControl = -1;

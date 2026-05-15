@@ -7,9 +7,8 @@ static constexpr char TAG[] = "InputVoltageRegulationMppt";
 void InputVoltageRegulationMppt::init()
 {
     m_control = MIN_CONTROL_VALUE;
-    m_step = DEFAULT_STEP;
     m_openCircuitVoltage_mV = PvArrayConfig::DEFAULT_OPEN_CIRCUIT_VOLTAGE_mV;
-    m_mpptVoltage = (m_openCircuitVoltage_mV * INITIAL_MPPT_VOLTAGE_PERCENT) / 100;
+    m_mpptVoltage = (m_openCircuitVoltage_mV * PvArrayConfig::INITIAL_MPPT_VOLTAGE_PERCENT) / 100;
     m_pvMeasurements = {};
 }
 
@@ -38,7 +37,8 @@ void InputVoltageRegulationMppt::setOpenCircuitVoltage(int openCircuitVoltage_mV
     if(m_openCircuitVoltage_mV != openCircuitVoltage_mV && openCircuitVoltage_mV > 0)
     {
         m_openCircuitVoltage_mV = openCircuitVoltage_mV;
-        m_mpptVoltage = (m_openCircuitVoltage_mV * INITIAL_MPPT_VOLTAGE_PERCENT) / 100;
+        m_mpptVoltage = (m_openCircuitVoltage_mV * PvArrayConfig::INITIAL_MPPT_VOLTAGE_PERCENT) / 100;
+        m_control = MIN_CONTROL_VALUE; // Reset control to minimum when OCV changes to avoid overshooting the new Vmpp target
         ESP_LOGI(TAG, "Open-circuit voltage set to %dmV, MPPT voltage target updated to %dmV", m_openCircuitVoltage_mV, m_mpptVoltage);
     }
 }

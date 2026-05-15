@@ -68,6 +68,8 @@ namespace DPSxDcConverterConfig
 
     // Refresh open-circuit voltage every 30 minutes when measurements are valid, to adapt to changing panel conditions
     static constexpr unsigned long OPEN_CIRCUIT_VOLTAGE_REFRESH_RATE_MS {30 * 60 * 1000};
+
+    static constexpr unsigned long LOW_POWER_OCV_COOLDOWN_MS {60 * 1000};
 }
 
 /**
@@ -92,13 +94,13 @@ class DPSxDcConverter : public Device, public ActuatorIf
     int getMaxControl() const override;
     bool hasMeasurements() const override;
     void enableOutput(bool enable, bool priority = false) override;
+    bool isOutputEnabled() const override { return m_outputState == OutputState::ON; }
     void applyControl(int controlValue) override;
     std::optional<int> getOpenCircuitVoltage_mV() const { return m_openCircuitVoltage_mV; }
     int getInVoltage_mV() const {return m_inVoltage_mV;}
     int getVoltage_mV() const {return m_outVoltage_mV;};
     int getCurrent_mA() const {return m_outCurrent_mA;};
     unsigned long getLastUpdateTime() const {return m_lastUpdateTime;};
-    bool isOutputEnabled() const {return m_outputEnabled;}
 
     private:
     enum class Register : uint16_t
@@ -136,6 +138,12 @@ class DPSxDcConverter : public Device, public ActuatorIf
         WRITE
     };
 
+    enum OutputState
+    {
+        OFF,
+        ON
+    };
+
     struct WriteRequest
     {
         Register address;
@@ -147,7 +155,7 @@ class DPSxDcConverter : public Device, public ActuatorIf
     static constexpr uint16_t CRC16_DEFAULT_VALUE    {0xFFFF};
     static constexpr uint16_t CRC16_POLYNOMIAL_VALUE {0xA001};
     static constexpr uint16_t FRAME_SIZE             {8}; // bytes — fixed by Modbus RTU spec
-    static constexpr uint8_t  NUM_OF_REGISTERS_TO_READ {4};
+    static constexpr uint8_t  NUM_OF_REGISTERS_TO_READ {8}; // UOUT, IOUT, POWER, UIN, LOCK, PROTECT, CV_CC, ON_OFF
 
     // ===== State Variables =====
     ControlMode m_controlMode{DPSxDcConverterConfig::CONTROL_MODE};
@@ -156,12 +164,12 @@ class DPSxDcConverter : public Device, public ActuatorIf
     int m_outCurrent_mA{};
     int m_setPointValue{};
     std::optional<int> m_openCircuitVoltage_mV{};  // nullopt until first valid Voc capture
-    bool m_ocvRefreshDisabledOutput{false};        // true when the 30-min timer forced output off; triggers re-enable after capture
+    bool m_ocvRefreshPending{false}; // Flag to indicate that an OCV refresh is pending, which temporarily disables output until the refresh is complete. This prevents the DPS from pushing current into the battery during the OCV measurement, which would cause the voltage to drop and yield an invalid reading.
     ModbusState m_messageState{};
     ModbusMessageType m_activeMessageType{};
     Register m_activeWriteRegister{}; 
     uint16_t m_activeWriteData{};
-    bool m_outputEnabled{};
+    OutputState m_outputState{OutputState::OFF};
     bool m_startupComplete{}; ///< Blocks Modbus until STARTUP_DELAY_MS has elapsed after init()
     int  m_uSetVoltage_bits{DPSxDcConverterConfig::MAX_MPPT_VOLTAGE_CONTROL_VALUE}; ///< Runtime U_SET target (device max until setBatteryProfile() is called)
     uint8_t m_readsSinceLastWrite{};
