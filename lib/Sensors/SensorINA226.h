@@ -52,12 +52,30 @@ class SensorINA226 : public Device, public SensorI2C, public MeasurementsIf
         return millis() - m_lastUpdateTime;
     }
 
-    virtual bool isMeasurementUpdated() override
+    /**
+     * @brief Returns true if the measurement has been updated since the last check.
+     * 
+     * @return true 
+     * @return false 
+     */
+    bool isMeasurementUpdated() override
     {
         const unsigned long age = measurementAge();
         const bool updated = (age < m_lastMeasurementAge || m_lastMeasurementAge == 0);
         m_lastMeasurementAge = age; // always update so the next detection reliably sees a large previous value
         return updated;
+    }
+
+    /**
+     * @brief Returns true if the measurements reflect the currently applied setpoint.
+     * 
+     * @return true 
+     * @return false 
+     */
+    bool areMeasurementsSettled() const override
+    {
+        // INA226 is continuously measuring in the background, so readings are always settled with respect to the applied setpoint.
+        return true;
     }
 
     private:

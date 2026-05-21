@@ -149,9 +149,8 @@ ChargeController::MeasurementSnapshot ChargeController::sampleMeasurements()
     snapshot.battery.current_mA = m_batteryMeasurements->getCurrent_mA();
     snapshot.pvValid      = m_pvMeasurements->isMeasurementValid();
     snapshot.batteryValid = m_batteryMeasurements->isMeasurementValid();
-    // isMeasurementUpdated() has a side effect (records last age) — call exactly
-    // once per cycle, and only when PV is valid (short-circuit prevents spurious call).
     snapshot.updated = snapshot.pvValid && m_pvMeasurements->isMeasurementUpdated();
+    snapshot.settled = m_pvMeasurements->areMeasurementsSettled();
     return snapshot;
 }
 
@@ -183,16 +182,18 @@ int ChargeController::computeDesiredSetpoint(MeasurementSnapshot snapshot)
 
     if (snapshot.updated)
     {
-        const bool enabledOutput = m_actuator->isOutputEnabled() && m_actuator->areMeasurementsSettled();
+        const bool outputIsOn    = m_actuator->isOutputEnabled();
+        const bool enabledOutput = outputIsOn && snapshot.settled;
 
-        // Detect output OFF→ON transition (external re-enable from front panel, or OCV recovery re-enable).
-        // Reset MPPT so stale frozen IVR state from before the OFF period is not applied immediately.
-        if (enabledOutput && !m_wasOutputEnabled && m_wasChargingAllowed)
+        // Detect output OFF→ON transition using relay state only — not areMeasurementsSettled(),
+        // which resets to false after every I_SET write. Tracking the combined flag would cause
+        // a spurious reset on every write→settle cycle while the relay stays continuously ON.
+        if (outputIsOn && !m_wasOutputEnabled && m_wasChargingAllowed)
         {
             ESP_LOGI(TAG, "Output re-enabled while charging allowed — resetting MPPT to prevent stale setpoint application");
             resetMpptStrategy();
         }
-        m_wasOutputEnabled = enabledOutput;
+        m_wasOutputEnabled = outputIsOn;
 
         if (enabledOutput && m_wasChargingAllowed && !m_wasVoltageLimitActive)
         {

@@ -16,10 +16,6 @@ public:
     virtual void applyControl(int controlValue) = 0;
     virtual void setBatteryProfile(const BatteryProfile& /*profile*/) {}
 
-    // Returns true when measurements reflect the currently applied setpoint.
-    // Actuators with write-to-read lag (e.g. Modbus) should override this to
-    // prevent P&O from computing gradients against a stale pre-write reading.
-    virtual bool areMeasurementsSettled() const { return true; }
     virtual ControlMode getControlMode() const = 0;
     virtual int getMinControl() const = 0;
     virtual int getMaxControl() const = 0;

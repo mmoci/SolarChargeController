@@ -41,6 +41,7 @@ class ChargeController
         bool pvValid{false};      // PV measurement is within stale timeout
         bool batteryValid{false}; // Battery measurement is within stale timeout
         bool updated{false};      // New PV reading arrived this cycle (implies pvValid)
+        bool settled{false};      // Actuator measurements are not polluted by a recent write
     };
 
     // Used to determine if charging is available (PV input vs battery voltage)

@@ -89,7 +89,6 @@ class DPSxDcConverter : public Device, public ActuatorIf
     // ActuatorIf overrides
     ControlMode getControlMode() const override;
     void setBatteryProfile(const BatteryProfile& profile) override;
-    bool areMeasurementsSettled() const override { return m_readsSinceLastWrite >= DPSxDcConverterConfig::SETTLE_READS_AFTER_WRITE; }
     int getMinControl() const override;
     int getMaxControl() const override;
     bool hasMeasurements() const override;
@@ -101,6 +100,8 @@ class DPSxDcConverter : public Device, public ActuatorIf
     int getVoltage_mV() const {return m_outVoltage_mV;};
     int getCurrent_mA() const {return m_outCurrent_mA;};
     unsigned long getLastUpdateTime() const {return m_lastUpdateTime;};
+    uint8_t getReadsSinceLastWrite() const { return m_readsSinceLastWrite; }
+    bool areMeasurementsSettled() const { return m_readsSinceLastWrite >= DPSxDcConverterConfig::SETTLE_READS_AFTER_WRITE; }
 
     private:
     enum class Register : uint16_t

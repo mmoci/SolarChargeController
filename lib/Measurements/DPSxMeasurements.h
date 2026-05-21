@@ -66,6 +66,11 @@ class DPSxMeasurements : public MeasurementsIf
         return updated;
     }
 
+    bool areMeasurementsSettled() const override 
+    { 
+        return p_dpsConverter->areMeasurementsSettled();
+    }
+
     private:
     DPSxDcConverter* p_dpsConverter;
     MeasurementSource m_measSource{};
