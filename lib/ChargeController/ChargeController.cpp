@@ -207,7 +207,7 @@ int ChargeController::computeDesiredSetpoint(MeasurementSnapshot snapshot)
 
 int ChargeController::applyLimitConstraints(int desiredSetpoint, MeasurementSnapshot snapshot)
 {
-    int limitedSetpoint = desiredSetpoint;
+    int limitedSetpoint {desiredSetpoint};
 
     if(m_batteryManager.isCurrentLimitActive() && snapshot.updated)
     {
@@ -234,5 +234,5 @@ void ChargeController::resetMpptStrategy()
     auto ocvOpt = m_pvMeasurements->getOpenCircuitVoltage_mV();
     if (ocvOpt.has_value())
         m_mpptStrategy->setOpenCircuitVoltage(ocvOpt.value());
-    ESP_LOGI(TAG, "MPPT reset, new OCV=%dmV", ocvOpt.value_or(-1));
+    ESP_LOGI(TAG, "MPPT reset, new Voc=%dmV", ocvOpt.value_or(-1));
 }

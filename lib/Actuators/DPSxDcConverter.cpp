@@ -116,6 +116,13 @@ void DPSxDcConverter::updateOpenCircuitVoltage()
         m_ocvRefreshPending = false;
         enableOutput(true);
     }
+
+    // Startup capture: output is already OFF (natural Voc state), grab it directly
+    if (!m_ocvRefreshPending && m_outputState == OutputState::OFF && hasMeasurements() && areMeasurementsSettled() && m_openCircuitVoltage_mV <= 0)
+    {
+        m_openCircuitVoltage_mV = getInVoltage_mV();
+        ESP_LOGI(TAG, "Open-circuit voltage captured at startup: %dmV", m_openCircuitVoltage_mV);
+    }
 }
 
 ActuatorIf::ControlMode DPSxDcConverter::getControlMode() const
@@ -231,7 +238,7 @@ void DPSxDcConverter::handleModbusMessages()
 
                     m_consecutiveErrors = 0; // Reset error count on successful read
                     m_lastUpdateTime = millis(); // Update last successful read time
-                    ESP_LOGD(TAG, "Read OK — OutputState=%s Uout=%dmV Iout=%dmA Uin=%dmV", 
+                    ESP_LOGD(TAG, "Read OK — OutputState=%s Vout=%dmV Iout=%dmA Vin=%dmV", 
                         m_outputState == OutputState::ON ? "ON" : "OFF", m_outVoltage_mV, m_outCurrent_mA, m_inVoltage_mV);
                     m_messageState = ModbusState::IDLE;
                     m_messageTimer.reset();

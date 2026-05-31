@@ -26,7 +26,7 @@ void MqttSolarControllerBridge::init()
 {
     registerCommands();
 
-    Logger::setLogHandler([this](const std::string& level, const std::string& tag, const std::string& message)
+    Logger::setMqttLogHandler([this](const std::string& level, const std::string& tag, const std::string& message)
     {
         publishLog(level, tag, message);
     });

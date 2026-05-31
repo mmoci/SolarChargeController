@@ -78,7 +78,7 @@ using LogHandlerFn = std::function<void(const std::string& level, const std::str
     } while(0)
     #define ESP_LOGD(tag, fmt, ...) do { \
         esp_log_write(ESP_LOG_DEBUG, tag, "[DEBUG] [%s] %s: " fmt "\n", _LOG_TS(), tag, ##__VA_ARGS__); \
-        if (Logger::mqttDebugEnabled) Logger::_dispatch("DEBUG", tag, fmt, ##__VA_ARGS__); \
+        Logger::_dispatch("DEBUG", tag, fmt, ##__VA_ARGS__); \
     } while(0)
 
 #elif defined(ARDUINO)
@@ -87,7 +87,7 @@ using LogHandlerFn = std::function<void(const std::string& level, const std::str
     #define ESP_LOGE(tag, fmt, ...) do { Serial.printf("[ERROR][%s] " fmt "\n", tag, ##__VA_ARGS__);   Logger::_dispatch("ERROR", tag, fmt, ##__VA_ARGS__); } while(0)
     #define ESP_LOGW(tag, fmt, ...) do { Serial.printf("[WARNING][%s] " fmt "\n", tag, ##__VA_ARGS__); Logger::_dispatch("WARN",  tag, fmt, ##__VA_ARGS__); } while(0)
     #define ESP_LOGI(tag, fmt, ...) do { Serial.printf("[INFO][%s] " fmt "\n", tag, ##__VA_ARGS__);    Logger::_dispatch("INFO",  tag, fmt, ##__VA_ARGS__); } while(0)
-    #define ESP_LOGD(tag, fmt, ...) do { Serial.printf("[DEBUG][%s] " fmt "\n", tag, ##__VA_ARGS__); if (Logger::mqttDebugEnabled) Logger::_dispatch("DEBUG", tag, fmt, ##__VA_ARGS__); } while(0)
+    #define ESP_LOGD(tag, fmt, ...) do { Serial.printf("[DEBUG][%s] " fmt "\n", tag, ##__VA_ARGS__);   Logger::_dispatch("DEBUG", tag, fmt, ##__VA_ARGS__); } while(0)
 
 #else
     // Native test target: errors to stderr, rest suppressed. No sink dispatch — tests have no MQTT.
@@ -101,36 +101,51 @@ using LogHandlerFn = std::function<void(const std::string& level, const std::str
 
 namespace Logger
 {
-    // Global handler — exactly one instance across all translation units (C++17 inline variable).
+    // Global handler for MQTT — exactly one instance across all translation units (C++17 inline variable).
     // nullptr by default: Logger works without a handler registered.
-    inline LogHandlerFn _logHandler{};
+    inline LogHandlerFn _mqttLogHandler{};
+    inline LogHandlerFn _sdCardLogHandler{};
 
     // Set to true to forward DEBUG messages to MQTT. Off by default — DEBUG is high-frequency
     // and will flood the broker. Enable only when analyzing detailed runtime behaviour.
     inline bool mqttDebugEnabled{false};
 
-    // Register a handler to forward log messages to (e.g. MQTT). Call once from setup().
-    inline void setLogHandler(LogHandlerFn handler)
+    // Register a handler to forward log messages to MQTT. Call once from setup().
+    inline void setMqttLogHandler(LogHandlerFn handler)
     {
-        _logHandler = std::move(handler);
+        _mqttLogHandler = std::move(handler);
+    }
+
+    // Register a handler to forward log messages to SD card. Call once from setup().
+    inline void setSdCardLogHandler(LogHandlerFn handler)
+    {
+        _sdCardLogHandler = std::move(handler);
     }
 
     // Remove the handler (e.g. before MQTT disconnect).
-    inline void clearLogHandler()
+    inline void clearLogHandlers()
     {
-        _logHandler = nullptr;
+        _mqttLogHandler = nullptr;
+        _sdCardLogHandler = nullptr;
     }
 
     // Called by ESP_LOGE/I/W macros. Formats the message and forwards to the registered handler.
     // Not intended to be called directly.
     inline void _dispatch(const char* level, const char* tag, const char* fmt, ...)
     {
-        if (!_logHandler) return;
+        if (!_mqttLogHandler && !_sdCardLogHandler) return;
+
         char buf[256];
         va_list args;
+
         va_start(args, fmt);
         vsnprintf(buf, sizeof(buf), fmt, args);
         va_end(args);
-        _logHandler(level, tag, buf);
+
+        if (_mqttLogHandler && (mqttDebugEnabled || strcmp(level, "DEBUG") != 0))
+            _mqttLogHandler(level, tag, buf);
+
+        if (_sdCardLogHandler)
+            _sdCardLogHandler(level, tag, buf);
     }
 }

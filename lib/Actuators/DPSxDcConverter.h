@@ -21,7 +21,7 @@ namespace DPSxDcConverterConfig
     //   IOUT               : 0.001A/bit  → register 5000 = 5.000A  (read display value)
     // MAX values represent the register value written at 100% control output.
     static constexpr int MAX_MPPT_VOLTAGE_CONTROL_VALUE   {5000}; // 50.00V in 0.01V/bit units
-    static constexpr int MAX_MPPT_CURRENT_CONTROL_VALUE   {3000}; // 3.000A — limited for PSU bench testing (PSU CC limit); restore to 5000 for real panel
+    static constexpr int MAX_MPPT_CURRENT_CONTROL_VALUE   {5000}; // 5.000A in 0.001A/bit units
 
     constexpr int selectControlValueFromControlMode()
     {

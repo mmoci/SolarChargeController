@@ -1,6 +1,7 @@
 #pragma once
 
 #include "MpptStrategyIf.h"
+#include "Config.h"
 
 class PerturbAndObserveMppt : public MpptStrategyIf
 {
@@ -14,7 +15,7 @@ class PerturbAndObserveMppt : public MpptStrategyIf
     void init() override;
     void update(Measurements pvMeasurements) override;
     int getMpptControl() const override {return m_control;}
-    void setOpenCircuitVoltage(int openCircuitVoltage_mV) override {} // No-op for P&O, but need to override since it's called by ChargeController
+    void setOpenCircuitVoltage(int openCircuitVoltage_mV) override;
     int getMaxSoftRampStep() const override {return MAX_STEP;} // Default ramping; can be overridden by specific strategies if needed
     int getMpptStep() const {return m_step;}
     void setMpptStep(int step) {m_step = step;}
@@ -31,17 +32,20 @@ class PerturbAndObserveMppt : public MpptStrategyIf
     
     // Proportionality constant for dynamic step sizing (units of control output per (mW/mV)), 
     // need to be tuned based on typical |dP/dV| range and desired responsiveness
-    static constexpr float K_STEP{2.5f};
+    static constexpr float K_STEP{0.5f}; // [mW/mV]
 
-    // Limits for dynamic step sizing based on gradient magnitude, to prevent excessive steps in very steep regions or when noise creates a large apparent gradient
-    static constexpr int DEFAULT_STEP{1};
-    static constexpr int MIN_STEP{1};
-    static constexpr int MAX_STEP{10}; // Keep overshoot small near the I-V knee; dynamic step handles fast climb when far from MPP
+    // Minimum Vin increase above the pre-collapse operating point that indicates irradiance has increased
+    // enough to invalidate the collapse ceiling. Sized to reject measurement noise (~100mV) while
+    // reliably detecting real irradiance changes (typically >500mV shift at same I_SET).
+    static constexpr int IRRADIANCE_INCREASE_VOLTAGE_MARGIN_mV{500};
 
     // Previous measurements for gradient calculation and dynamic step sizing
     Measurements m_pvMeasurements{};
     int m_control{MIN_CONTROL_VALUE};
+    int m_controlCollapseCeiling{MIN_CONTROL_VALUE};
+    int m_voltageAtCeiling_mV{};  // Vin just before the last collapse; used to detect irradiance increase
     MpptGradient m_gradientData{};
     Direction m_direction{};
     int m_step{DEFAULT_STEP};
+    int m_openCircuitVoltage_mV{};
 };

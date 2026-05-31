@@ -5,7 +5,10 @@
 #include "OtaHandler.h"
 #include "Utility.h"
 #include "Logger.h"
+#include "SdLogger.h"
 #include "Secrets.h"
+
+static SdLogger sdLogger{5}; // CS pin 5; no-op when SD_CARD not defined
 
 static constexpr char TAG[] = "Main";
 
@@ -60,6 +63,8 @@ void setup()
     ESP_LOGI("BOOT", "Reset reason: %d", (int)esp_reset_reason());
     ESP_LOGI(TAG, "setup() start");
 
+    sdLogger.init();
+
     #ifdef MQTT_CLIENT
     ESP_LOGI(TAG, "Initialising MQTT client...");
     mqttClient.init();
@@ -103,6 +108,9 @@ void loop()
             controller.getBatteryMode(),
             controller.getMpptControl());
     #endif
+
+    if(millis() - sdLogger.getLastFlushTime() >= SdLogger::FLUSH_INTERVAL_MS)
+        sdLogger.flush();
 
     delay(3);
 }

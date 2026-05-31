@@ -2,7 +2,7 @@
 
 #include "Initializer.h"
 #include "DPSxMeasurements.h"
-#include "InputVoltageRegulationMppt.h"
+#include "PerturbAndObserveMppt.h"
 
 class InitializerDps : public Initializer
 {
@@ -21,6 +21,6 @@ class InitializerDps : public Initializer
     DPSxDcConverter dpsDcConverter{};
     DPSxMeasurements pvMeasurements{&dpsDcConverter, DPSxMeasurements::MeasurementSource::Input};
     DPSxMeasurements batteryMeasurements{&dpsDcConverter, DPSxMeasurements::MeasurementSource::Output};
-    InputVoltageRegulationMppt dpsMpptStrategy{};
+    PerturbAndObserveMppt dpsMpptStrategy{};
 };
     
