@@ -94,7 +94,7 @@ int ChargeController::clampLimitPI(int measured, int limit, int mpptControl, lon
     integralError = constrain(integralError, 0L, ChargeControllerConfig::MAX_INTEGRAL_ERROR);
     int mpptControlCorrection = static_cast<int>(std::roundl(ChargeControllerConfig::Kp * error + ChargeControllerConfig::Ki * integralError));
 
-    return constrain(mpptControl - mpptControlCorrection, 0, 100);
+    return constrain(mpptControl - mpptControlCorrection, 0, MpptStrategyIf::MAX_CONTROL_VALUE);
 }
 
 int ChargeController::softRampControl(int currentMpptControl, int stepSize)
@@ -177,7 +177,7 @@ int ChargeController::computeDesiredSetpoint(MeasurementSnapshot snapshot)
             ESP_LOGW(TAG, "Battery measurements stale — reducing control");
             lastBattStaleLog = now;
         }
-        return std::max(0, m_mpptControl - 10);
+        return std::max(0, m_mpptControl - MpptStrategyIf::MAX_CONTROL_VALUE / 10); // Reduce control by 10% if battery measurements are stale, as a precaution against overcharging due to undetected high voltage
     }
 
     if (snapshot.updated)

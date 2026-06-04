@@ -3,6 +3,9 @@
 #include <Arduino.h>
 #include <sstream>
 #include <iomanip>
+#include <queue>
+#include <vector>
+#include <optional>
 
 /** Simple timer utility class */
 class Timer
@@ -40,6 +43,98 @@ class Timer
     bool active() const { return m_active; }
 
     unsigned long getDuration() const { return m_duration; }
+};
+
+template <typename T, size_t MaxSize>
+class CircularBuffer
+{
+    private:
+    std::array<std::optional<T>, MaxSize> m_buffer{};
+    std::size_t m_index{0};
+
+    public:
+    static constexpr char TAG[] = "Utility";
+
+    void add(const T& item)
+    {
+        m_buffer[m_index] = item;
+        m_index = (m_index + 1) % MaxSize;
+    }
+
+    void add(T&& item)
+    {
+        m_buffer[m_index] = std::move(item);
+        m_index = (m_index + 1) % MaxSize;
+    }
+
+    void clear()
+    {
+        for (auto& element : m_buffer)
+            element.reset();
+        m_index = 0;
+    }
+
+    bool empty() const
+    {
+        return std::all_of(m_buffer.begin(), m_buffer.end(), [](const std::optional<T>& element) { return !element.has_value(); });
+    }
+
+    std::size_t size() const
+    {
+        return std::count_if(m_buffer.begin(), m_buffer.end(), [](const std::optional<T>& element) { return element.has_value(); });
+    }
+
+    std::optional<T> getMinElement() const
+    {
+        if (empty())
+        {
+            ESP_LOGW(TAG, "getMinElement called on empty buffer");
+            return std::nullopt;
+        }
+        return *std::min_element(m_buffer.begin(), m_buffer.end(), [](const std::optional<T>& a, const std::optional<T>& b)
+        {
+            if (!a.has_value()) return false; // Treat empty slots as greater than any value
+            if (!b.has_value()) return true;
+            return a.value() < b.value();
+        });
+    }
+
+    std::optional<T> getMaxElement() const
+    {
+        if (empty())
+        {
+            ESP_LOGW(TAG, "getMaxElement called on empty buffer");
+            return std::nullopt;
+        }
+        return *std::max_element(m_buffer.begin(), m_buffer.end(), [](const std::optional<T>& a, const std::optional<T>& b)
+        {
+            if (!a.has_value()) return true; // Treat empty slots as less than any value
+            if (!b.has_value()) return false;
+            return a.value() < b.value();
+        });
+    }
+
+    std::vector<T> getAll() const
+    {
+        std::vector<T> items;
+        for (const auto& element : m_buffer)
+        {
+            if (element.has_value())
+                items.push_back(*element);
+        }
+        return items;
+    }
+
+    const std::optional<T>& operator[](std::size_t index) const
+    {
+        if (index >= MaxSize)
+        {
+            ESP_LOGE(TAG, "Index out of bounds: %zu (max size is %zu)", index, MaxSize);
+            static const std::optional<T> dummy{};
+            return dummy;
+        }
+        return m_buffer[index];
+    }
 };
 
 struct Measurements

@@ -44,6 +44,7 @@ class PerturbAndObserveMppt : public MpptStrategyIf
     int m_control{MIN_CONTROL_VALUE};
     int m_controlCollapseCeiling{MIN_CONTROL_VALUE};
     int m_voltageAtCeiling_mV{};  // Vin just before the last collapse; used to detect irradiance increase
+    CircularBuffer<std::pair<int, int>, 3> m_collapsePointsCandidates{}; // Queue of recent (control, voltage) points that are candidates for collapse points
     MpptGradient m_gradientData{};
     Direction m_direction{};
     int m_step{DEFAULT_STEP};

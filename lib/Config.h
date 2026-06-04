@@ -37,8 +37,7 @@ namespace ChargeControllerConfig
 namespace PvArrayConfig
 {
     static constexpr int DEFAULT_OPEN_CIRCUIT_VOLTAGE_mV {49000};
-    static constexpr int INITIAL_MPPT_VOLTAGE_PERCENT{84};
-    static constexpr int VOLTAGE_COLLAPSE_THRESHOLD_PERCENT {75};
+    static constexpr int VOLTAGE_COLLAPSE_THRESHOLD_PERCENT {78};
 }
 
 namespace BatteryConfig

@@ -12,6 +12,7 @@ public:
     void init() override { m_control = MIN_CONTROL_VALUE; m_updateCount = 0; }
     void update(Measurements /*m*/) override { m_control = std::min(m_control + 1, MAX_CONTROL_VALUE); ++m_updateCount; }
     int getMpptControl() const override { return m_control; }
+    void setOpenCircuitVoltage(int /*voc_mV*/) override {}
     int getUpdateCount() const { return m_updateCount; }
 private:
     int m_control{MIN_CONTROL_VALUE};

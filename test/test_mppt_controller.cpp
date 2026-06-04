@@ -159,3 +159,138 @@ TEST_F(PerturbAndObserveMpptTest, OscillatesAroundMaximum)
     
     EXPECT_GT(oscillations, 0);
 }
+
+// ── Collapse-ceiling tests ────────────────────────────────────────────────────
+//
+// Panel I-V curve at low irradiance has a hard cliff: when I_SET exceeds Isc,
+// Vin collapses abruptly. These tests simulate that cliff by injecting a
+// measurement whose voltage drops below the collapse threshold in a single step,
+// which is exactly what happens in hardware.
+//
+// Setup shared across all collapse tests:
+//   voc = 40 000 mV  → threshold = 40 000 × 78 % = 31 200 mV
+//   normal Vin  = 35 000 mV  (above threshold, panel healthy)
+//   collapsed Vin = 26 200 mV  (below threshold, panel stalled)
+//
+// With these measurements and K_STEP = 0.5:
+//   • Update 1 from init: ΔV = 35 000, gradient = 0.25 → step clamped to MIN = 1
+//   • Updates 2-N with same measurement: ΔV = 0 → skip → step stays 1
+//   → After N updates: control = N  (predictable ceiling arithmetic)
+
+// After a collapse, the ceiling must be set and control must not recover above it.
+TEST_F(PerturbAndObserveMpptTest, CollapseGuard_SetsCeilingAndLimitsRecovery)
+{
+    const int voc_mV = 40000;
+    const int threshold_mV = voc_mV * PvArrayConfig::VOLTAGE_COLLAPSE_THRESHOLD_PERCENT / 100; // 31200
+    mppt.setOpenCircuitVoltage(voc_mV);
+
+    // Ramp control to 30 with healthy panel measurements
+    const Measurements normalM{35000, 500};
+    for(int i = 0; i < 30; ++i)
+        mppt.update(normalM);
+    ASSERT_EQ(mppt.getMpptControl(), 30);
+
+    // Inject collapse: Vin drops below threshold while previous Vin was above it
+    // → ceiling is set to max(0, 30 − CONTROL_COLLAPSE_BACKOFF) = 10
+    mppt.update({threshold_mV - 5000, 50}); // 26 200 mV
+
+    const int expectedCeiling = std::max(MpptStrategyIf::MIN_CONTROL_VALUE,
+                                         30 - MpptStrategyIf::CONTROL_COLLAPSE_BACKOFF); // 10
+
+    // Recovery: run enough updates to climb back and reach the ceiling
+    for(int i = 0; i < 50; ++i)
+        mppt.update(normalM);
+
+    EXPECT_EQ(mppt.getMpptControl(), expectedCeiling);  // Settled at ceiling, not above it
+}
+
+// While already in a collapsed state (Vin below threshold two cycles in a row)
+// the ceiling must NOT be overwritten downward — only the first entry from
+// above threshold should fix the ceiling.
+TEST_F(PerturbAndObserveMpptTest, CollapseGuard_CeilingNotOverwrittenDuringOngoingCollapse)
+{
+    const int voc_mV = 40000;
+    const int threshold_mV = voc_mV * PvArrayConfig::VOLTAGE_COLLAPSE_THRESHOLD_PERCENT / 100;
+    mppt.setOpenCircuitVoltage(voc_mV);
+
+    const Measurements normalM{35000, 500};
+    const Measurements collapseM{threshold_mV - 5000, 50}; // 26 200 mV
+
+    for(int i = 0; i < 30; ++i)
+        mppt.update(normalM);
+    ASSERT_EQ(mppt.getMpptControl(), 30);
+
+    // First collapse: ceiling fixed at 10, control drops to 0
+    // m_pvMeasurements is now {26 200, 50}
+    mppt.update(collapseM);
+
+    // Second collapse while previous Vin is still below threshold
+    // → ceiling guard fires but must NOT update the ceiling again
+    mppt.update(collapseM);
+
+    // If ceiling was preserved (10): control recovers to 10.
+    // If ceiling was overwritten (max(0, 0−20) = 0): control stays stuck at 0.
+    for(int i = 0; i < 50; ++i)
+        mppt.update(normalM);
+
+    const int expectedCeiling = std::max(MpptStrategyIf::MIN_CONTROL_VALUE,
+                                         30 - MpptStrategyIf::CONTROL_COLLAPSE_BACKOFF); // 10
+    EXPECT_EQ(mppt.getMpptControl(), expectedCeiling);
+}
+
+// When irradiance increases (same I_SET but higher Vin), the old ceiling is stale
+// and must be cleared so P&O can climb to the new, higher MPP.
+TEST_F(PerturbAndObserveMpptTest, CollapseGuard_IrradianceIncreaseClearsCeiling)
+{
+    const int voc_mV = 40000;
+    const int threshold_mV = voc_mV * PvArrayConfig::VOLTAGE_COLLAPSE_THRESHOLD_PERCENT / 100;
+    mppt.setOpenCircuitVoltage(voc_mV);
+
+    const Measurements normalM{35000, 500};
+
+    for(int i = 0; i < 30; ++i)
+        mppt.update(normalM);
+    mppt.update({threshold_mV - 5000, 50}); // Collapse → ceiling = 10
+
+    // Recover to ceiling and let the baseline Vin (35 000 mV) get recorded
+    for(int i = 0; i < 15; ++i)
+        mppt.update(normalM);
+    ASSERT_EQ(mppt.getMpptControl(), 10); // At ceiling, baseline recorded
+
+    // Higher irradiance: Vin > baseline + IRRADIANCE_INCREASE_VOLTAGE_MARGIN (500 mV)
+    // 35 600 mV > 35 000 + 500 = 35 500 mV → ceiling should be cleared
+    mppt.update({35600, 600});
+
+    // Control is now free to grow past the old ceiling
+    for(int i = 0; i < 50; ++i)
+        mppt.update({35600, static_cast<int>(600 + i * 10)});
+
+    EXPECT_GT(mppt.getMpptControl(), 10);
+}
+
+// A new Voc reading (e.g. after the 30-min OCV refresh) must also clear the
+// ceiling, because a different Voc implies different irradiance conditions.
+TEST_F(PerturbAndObserveMpptTest, SetOpenCircuitVoltage_ClearsCeiling)
+{
+    const int voc_mV = 40000;
+    const int threshold_mV = voc_mV * PvArrayConfig::VOLTAGE_COLLAPSE_THRESHOLD_PERCENT / 100;
+    mppt.setOpenCircuitVoltage(voc_mV);
+
+    const Measurements normalM{35000, 500};
+
+    for(int i = 0; i < 30; ++i)
+        mppt.update(normalM);
+    mppt.update({threshold_mV - 5000, 50}); // Collapse → ceiling = 10
+
+    for(int i = 0; i < 15; ++i)
+        mppt.update(normalM);
+    ASSERT_EQ(mppt.getMpptControl(), 10);
+
+    // Simulate OCV refresh with a new (different) Voc value → ceiling must reset
+    mppt.setOpenCircuitVoltage(voc_mV + 1000); // Triggers the update branch
+
+    for(int i = 0; i < 50; ++i)
+        mppt.update(normalM);
+
+    EXPECT_GT(mppt.getMpptControl(), 10);
+}

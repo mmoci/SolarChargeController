@@ -13,9 +13,10 @@ class MpptStrategyIf
 
     virtual ~MpptStrategyIf() = default;
 
-    static constexpr int MAX_STEP{5};     // Default soft-ramp step size (% of control range per update cycle)
+    static constexpr int MAX_STEP{50};     // Default soft-ramp step size (5% of control range per update cycle)
     static constexpr int DEFAULT_STEP{1};  // Default P&O perturbation step
     static constexpr int MIN_STEP{1};      // Minimum P&O perturbation step
     static constexpr int MIN_CONTROL_VALUE{0};
-    static constexpr int MAX_CONTROL_VALUE{100};
+    static constexpr int MAX_CONTROL_VALUE{1000}; // Control value is in 0.1% increments to allow for finer granularity (e.g. 0.5% step = 5 units)
+    static constexpr int CONTROL_COLLAPSE_BACKOFF{20}; // When voltage collapse is detected, back off control by this amount from the last known safe control value at the ceiling. 
 };
