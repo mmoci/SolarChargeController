@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <sstream>
 #include <iomanip>
+#include <array>
 #include <queue>
 #include <vector>
 #include <optional>
@@ -53,8 +54,6 @@ class CircularBuffer
     std::size_t m_index{0};
 
     public:
-    static constexpr char TAG[] = "Utility";
-
     void add(const T& item)
     {
         m_buffer[m_index] = item;
@@ -87,10 +86,7 @@ class CircularBuffer
     std::optional<T> getMinElement() const
     {
         if (empty())
-        {
-            ESP_LOGW(TAG, "getMinElement called on empty buffer");
             return std::nullopt;
-        }
         return *std::min_element(m_buffer.begin(), m_buffer.end(), [](const std::optional<T>& a, const std::optional<T>& b)
         {
             if (!a.has_value()) return false; // Treat empty slots as greater than any value
@@ -102,10 +98,7 @@ class CircularBuffer
     std::optional<T> getMaxElement() const
     {
         if (empty())
-        {
-            ESP_LOGW(TAG, "getMaxElement called on empty buffer");
             return std::nullopt;
-        }
         return *std::max_element(m_buffer.begin(), m_buffer.end(), [](const std::optional<T>& a, const std::optional<T>& b)
         {
             if (!a.has_value()) return true; // Treat empty slots as less than any value
@@ -127,12 +120,9 @@ class CircularBuffer
 
     const std::optional<T>& operator[](std::size_t index) const
     {
+        static const std::optional<T> dummy{};
         if (index >= MaxSize)
-        {
-            ESP_LOGE(TAG, "Index out of bounds: %zu (max size is %zu)", index, MaxSize);
-            static const std::optional<T> dummy{};
             return dummy;
-        }
         return m_buffer[index];
     }
 };

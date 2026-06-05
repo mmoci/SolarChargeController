@@ -191,11 +191,11 @@ TEST_F(PerturbAndObserveMpptTest, CollapseGuard_SetsCeilingAndLimitsRecovery)
     ASSERT_EQ(mppt.getMpptControl(), 30);
 
     // Inject collapse: Vin drops below threshold while previous Vin was above it
-    // → ceiling is set to max(0, 30 − CONTROL_COLLAPSE_BACKOFF) = 10
+    // → ceiling is taken from FIFO minimum: after 30 updates buffer holds {27,28,29} → min = 27
+    // (add() is called before control increment so entry N is control value N−1)
     mppt.update({threshold_mV - 5000, 50}); // 26 200 mV
 
-    const int expectedCeiling = std::max(MpptStrategyIf::MIN_CONTROL_VALUE,
-                                         30 - MpptStrategyIf::CONTROL_COLLAPSE_BACKOFF); // 10
+    const int expectedCeiling = 27; // FIFO[3] min after ramp-to-30: entries {27,28,29}
 
     // Recovery: run enough updates to climb back and reach the ceiling
     for(int i = 0; i < 50; ++i)
@@ -233,8 +233,7 @@ TEST_F(PerturbAndObserveMpptTest, CollapseGuard_CeilingNotOverwrittenDuringOngoi
     for(int i = 0; i < 50; ++i)
         mppt.update(normalM);
 
-    const int expectedCeiling = std::max(MpptStrategyIf::MIN_CONTROL_VALUE,
-                                         30 - MpptStrategyIf::CONTROL_COLLAPSE_BACKOFF); // 10
+    const int expectedCeiling = 27; // FIFO[3] min after ramp-to-30: entries {27,28,29}
     EXPECT_EQ(mppt.getMpptControl(), expectedCeiling);
 }
 
@@ -253,19 +252,77 @@ TEST_F(PerturbAndObserveMpptTest, CollapseGuard_IrradianceIncreaseClearsCeiling)
     mppt.update({threshold_mV - 5000, 50}); // Collapse → ceiling = 10
 
     // Recover to ceiling and let the baseline Vin (35 000 mV) get recorded
-    for(int i = 0; i < 15; ++i)
+    for(int i = 0; i < 30; ++i)
         mppt.update(normalM);
-    ASSERT_EQ(mppt.getMpptControl(), 10); // At ceiling, baseline recorded
+    ASSERT_EQ(mppt.getMpptControl(), 27); // At ceiling (FIFO min = 27)
 
-    // Higher irradiance: Vin > baseline + IRRADIANCE_INCREASE_VOLTAGE_MARGIN (500 mV)
-    // 35 600 mV > 35 000 + 500 = 35 500 mV → ceiling should be cleared
+    // Higher irradiance: Vin > baseline (35 000 mV) + IRRADIANCE_INCREASE_VOLTAGE_MARGIN (500 mV)
+    // 35 600 mV > 35 500 mV → ceiling should be cleared
     mppt.update({35600, 600});
 
     // Control is now free to grow past the old ceiling
     for(int i = 0; i < 50; ++i)
         mppt.update({35600, static_cast<int>(600 + i * 10)});
 
-    EXPECT_GT(mppt.getMpptControl(), 10);
+    EXPECT_GT(mppt.getMpptControl(), 27);
+}
+
+// ── Proactive ceiling tests ─────────────────────────────────────────────────
+
+// Knee detection: a large ΔVin drop at MIN_STEP while direction is Up (power
+// still increasing) signals the steep knee of the I-V curve. The ceiling must
+// be set proactively to prevent the next step from crossing into collapse.
+//
+// Setup:
+//   Ramp to control=50 with {35000, 1500}: step=1 throughout (gradient=0.5→1)
+//   Inject {34750, 1520}: ΔV=-250mV < -KNEE_DELTA_VOLTAGE_THRESHOLD(-150)
+//                          ΔP = 34750×1520/1000 − 35000×1500/1000 = +320mW > 0
+//                          → direction stays Up, knee fires: ceiling=50
+TEST_F(PerturbAndObserveMpptTest, KneeDetection_SetsProactiveCeiling)
+{
+    const Measurements normalM{35000, 1500};
+    for(int i = 0; i < 50; ++i)
+        mppt.update(normalM);
+    ASSERT_EQ(mppt.getMpptControl(), 50);
+
+    // Inject knee: ΔV=-250mV, ΔP=+320mW → direction stays Up, knee guard fires
+    mppt.update({34750, 1520});
+
+    // Control must not exceed the knee point even after many further updates
+    for(int i = 0; i < 200; ++i)
+        mppt.update(normalM);
+
+    EXPECT_LE(mppt.getMpptControl(), 50);
+}
+
+// Direction-flip proactive ceiling: the first Down direction flip at MIN_STEP
+// sets the ceiling at peakControl (turn-around point), preventing P&O from
+// overshooting on the next Up phase.
+//
+// Setup:
+//   Ramp to control=50 with {35200, 1500}
+//   Inject {35100, 1498}: ΔV=-100mV, ΔP=-222mW < 0 → direction flips to Down
+//                          gradient=222/100=2.22 → step=1 → ceiling fires at 50
+TEST_F(PerturbAndObserveMpptTest, DirectionFlip_SetsProactiveCeiling)
+{
+    const Measurements normalM{35200, 1500};
+    for(int i = 0; i < 50; ++i)
+        mppt.update(normalM);
+    ASSERT_EQ(mppt.getMpptControl(), 50);
+
+    // Inject flip: ΔP=-222mW, ΔV=-100mV, step=1 → direction flips, ceiling set at 50
+    mppt.update({35100, 1498});
+    ASSERT_EQ(mppt.getMpptControl(), 49); // stepped down from peak
+
+    // Control must never exceed the proactive ceiling during full recovery cycle
+    // (P&O walks Down to 0, bounces, climbs back to ceiling=50 — needs ~150 updates)
+    int maxControl = mppt.getMpptControl();
+    for(int i = 0; i < 200; ++i)
+    {
+        mppt.update(normalM);
+        maxControl = std::max(maxControl, mppt.getMpptControl());
+    }
+    EXPECT_LE(maxControl, 50);
 }
 
 // A new Voc reading (e.g. after the 30-min OCV refresh) must also clear the
@@ -282,9 +339,9 @@ TEST_F(PerturbAndObserveMpptTest, SetOpenCircuitVoltage_ClearsCeiling)
         mppt.update(normalM);
     mppt.update({threshold_mV - 5000, 50}); // Collapse → ceiling = 10
 
-    for(int i = 0; i < 15; ++i)
+    for(int i = 0; i < 30; ++i)
         mppt.update(normalM);
-    ASSERT_EQ(mppt.getMpptControl(), 10);
+    ASSERT_EQ(mppt.getMpptControl(), 27); // At ceiling (FIFO min = 27)
 
     // Simulate OCV refresh with a new (different) Voc value → ceiling must reset
     mppt.setOpenCircuitVoltage(voc_mV + 1000); // Triggers the update branch
@@ -292,5 +349,5 @@ TEST_F(PerturbAndObserveMpptTest, SetOpenCircuitVoltage_ClearsCeiling)
     for(int i = 0; i < 50; ++i)
         mppt.update(normalM);
 
-    EXPECT_GT(mppt.getMpptControl(), 10);
+    EXPECT_GT(mppt.getMpptControl(), 27);
 }

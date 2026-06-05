@@ -17,6 +17,8 @@ void PerturbAndObserveMppt::init()
 
 void PerturbAndObserveMppt::update(Measurements pvMeasurements)
 {
+    bool directionFlipped{false};
+
     long power_mW {pvMeasurements.voltage_mV * pvMeasurements.current_mA / 1000}; // Convert to mW to avoid overflow and match typical PV power units
     long m_power_mW {m_pvMeasurements.voltage_mV * m_pvMeasurements.current_mA / 1000}; // Previous power in mW
 
@@ -53,7 +55,10 @@ void PerturbAndObserveMppt::update(Measurements pvMeasurements)
         m_step = constrain(static_cast<int>(K_STEP * newGradient.gradient), MIN_STEP, MAX_STEP);
 
         if(deltaPower_mW < 0)
+        {
             m_direction = (m_direction == Direction::Up) ? Direction::Down : Direction::Up;
+            directionFlipped = true;
+        }
     }
     else
     {
@@ -63,8 +68,20 @@ void PerturbAndObserveMppt::update(Measurements pvMeasurements)
 
     if(m_direction == Direction::Up)
     {
-        m_control = std::min(m_control + m_step, m_controlCollapseCeiling);
-        m_collapsePointsCandidates.add({m_control, pvMeasurements.voltage_mV}); // Track this point as a potential collapse point candidate
+        if(deltaVoltage_mV < -KNEE_DELTA_VOLTAGE_THRESHOLD_mV && m_step == MIN_STEP && m_control < m_controlCollapseCeiling)
+        {
+            m_collapsePointsCandidates.add({m_control, pvMeasurements.voltage_mV});
+            m_controlCollapseCeiling = m_control;
+            m_voltageAtCeiling_mV = pvMeasurements.voltage_mV;
+            ESP_LOGI(TAG, "ΔVin (%dmV) — potential knee detected, setting collapse ceiling to control=%.2f%% (Vin=%dmV)",
+                    std::abs(deltaVoltage_mV), m_controlCollapseCeiling / 10.0, pvMeasurements.voltage_mV);
+        }
+        else
+        {
+            m_collapsePointsCandidates.add({m_control, pvMeasurements.voltage_mV});
+            m_control = std::min(m_control + m_step, m_controlCollapseCeiling);
+        }
+
         // Detect irradiance increase: if we're hitting the ceiling and Vin is significantly
         // higher than it was just before the last collapse (same I_SET, higher voltage = panel
         // can deliver more), the old ceiling is no longer valid.
@@ -79,8 +96,20 @@ void PerturbAndObserveMppt::update(Measurements pvMeasurements)
         }
     }
     else
+    {
+        const int peakControl{m_control};
         m_control -= m_step;
 
+        if(directionFlipped && m_step == MIN_STEP && peakControl < m_controlCollapseCeiling)
+        {
+            m_controlCollapseCeiling = peakControl;
+            m_voltageAtCeiling_mV = m_pvMeasurements.voltage_mV;
+            m_collapsePointsCandidates.add({peakControl, m_pvMeasurements.voltage_mV});
+            ESP_LOGI(TAG, "Direction flipped to Down at control=%.2f%% with |dP/dV|=%.3f — potential knee detected, setting collapse ceiling to control=%.2f%% (Vin=%dmV)",
+                    peakControl / 10.0, newGradient.gradient, m_controlCollapseCeiling / 10.0, m_voltageAtCeiling_mV);
+        }
+    }
+        
     m_control = constrain(m_control, MIN_CONTROL_VALUE, MAX_CONTROL_VALUE);
 
     // Boundary reflection at MIN only: prevents getting permanently stuck at 0% if direction stays Down.

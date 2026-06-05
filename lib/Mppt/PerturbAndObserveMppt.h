@@ -29,6 +29,9 @@ class PerturbAndObserveMppt : public MpptStrategyIf
 
     // Minimum voltage change to trigger a step change, prevents overreacting to noise
     static constexpr int MIN_DELTA_VOLTAGE_mV{10};
+
+    // Voltage change threshold for knee detection, used to prevent overshooting the MPP knee
+    static constexpr int KNEE_DELTA_VOLTAGE_THRESHOLD_mV{150}; 
     
     // Proportionality constant for dynamic step sizing (units of control output per (mW/mV)), 
     // need to be tuned based on typical |dP/dV| range and desired responsiveness
