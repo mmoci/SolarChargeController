@@ -150,7 +150,6 @@ ChargeController::MeasurementSnapshot ChargeController::sampleMeasurements()
     snapshot.pvValid      = m_pvMeasurements->isMeasurementValid();
     snapshot.batteryValid = m_batteryMeasurements->isMeasurementValid();
     snapshot.updated = snapshot.pvValid && m_pvMeasurements->isMeasurementUpdated();
-    snapshot.settled = m_pvMeasurements->areMeasurementsSettled();
     return snapshot;
 }
 
@@ -182,20 +181,16 @@ int ChargeController::computeDesiredSetpoint(MeasurementSnapshot snapshot)
 
     if (snapshot.updated)
     {
-        const bool outputIsOn    = m_actuator->isOutputEnabled();
-        const bool enabledOutput = outputIsOn && snapshot.settled;
+        const bool isOutputEnabled = m_actuator->isOutputEnabled();
 
-        // Detect output OFF→ON transition using relay state only — not areMeasurementsSettled(),
-        // which resets to false after every I_SET write. Tracking the combined flag would cause
-        // a spurious reset on every write→settle cycle while the relay stays continuously ON.
-        if (outputIsOn && !m_wasOutputEnabled && m_wasChargingAllowed)
+        if (isOutputEnabled && !m_wasOutputEnabled && m_wasChargingAllowed)
         {
             ESP_LOGI(TAG, "Output re-enabled while charging allowed — resetting MPPT to prevent stale setpoint application");
             resetMpptStrategy();
         }
-        m_wasOutputEnabled = outputIsOn;
+        m_wasOutputEnabled = isOutputEnabled;
 
-        if (enabledOutput && m_wasChargingAllowed && !m_wasVoltageLimitActive)
+        if (isOutputEnabled && m_wasChargingAllowed && !m_wasVoltageLimitActive)
         {
             m_mpptStrategy->update(snapshot.pv);
             m_mpptControl = softRampControl(m_mpptStrategy->getMpptControl(), m_mpptStrategy->getMaxSoftRampStep());

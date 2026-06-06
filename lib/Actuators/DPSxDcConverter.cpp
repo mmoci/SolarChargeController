@@ -65,8 +65,6 @@ void DPSxDcConverter::update()
 void DPSxDcConverter::enableOutput(bool enable, bool priority)
 {
     // Avoid redundant writes that would reset the DPS internal timer and cause unnecessary wear on the relay.
-    // State is confirmed by periodic reads, so this check may lag hardware reality by one read cycle (~450ms),
-    // but enqueWriteRequest deduplication ensures at most one pending write per register regardless.
     if ((enable && m_outputState == OutputState::ON) || (!enable && m_outputState == OutputState::OFF))
         return;
 
@@ -96,8 +94,9 @@ void DPSxDcConverter::updateOpenCircuitVoltage()
 {
     m_openCircuitVoltageTimer.update();
 
-    const bool panelPresent = (m_inVoltage_mV > std::max(m_outVoltage_mV, 5000) + 1000);
-    const bool hasLowOutputCurrent = hasMeasurements() && areMeasurementsSettled() && m_outCurrent_mA < 100;
+    const bool panelPresent = (m_inVoltage_mV > std::max(m_outVoltage_mV, DPSxDcConverterConfig::PANEL_PRESENT_MIN_OUTPUT_VOLTAGE_mV) 
+                                + DPSxDcConverterConfig::PANEL_PRESENT_VIN_HEADROOM_mV);
+    const bool hasLowOutputCurrent = hasMeasurements() && m_outCurrent_mA < DPSxDcConverterConfig::LOW_OUTPUT_CURRENT_THRESHOLD_mA;
     
     // Refresh open-circuit voltage if the timer has elapsed or if the panel is present but output current is very low
     if (!m_ocvRefreshPending && m_outputState == OutputState::ON &&
@@ -107,19 +106,20 @@ void DPSxDcConverter::updateOpenCircuitVoltage()
         m_ocvRefreshPending = true; // Flag to indicate that an OCV refresh is pending
         enableOutput(false, true);  // Urgent OFF to let Vin rise to Voc
         m_openCircuitVoltageTimer.trigger();
+        ESP_LOGI(TAG, "Output disabled to refresh open-circuit voltage (panelPresent=%d, hasLowOutputCurrent=%d)", panelPresent, hasLowOutputCurrent);
     }
 
-    // Once output is disabled and measurements have settled, capture the open-circuit voltage and re-enable output
-    if (m_ocvRefreshPending && m_outputState == OutputState::OFF && areMeasurementsSettled())
+    // Once output is disabled, capture the open-circuit voltage and re-enable output
+    if (m_ocvRefreshPending && m_outputState == OutputState::OFF && hasMeasurements() && m_inVoltage_mV > 0)
     {
         m_openCircuitVoltage_mV = getInVoltage_mV();
-        ESP_LOGI(TAG, "Open-circuit voltage refreshed: %dmV", m_openCircuitVoltage_mV);
         m_ocvRefreshPending = false;
         enableOutput(true);
+        ESP_LOGI(TAG, "Open-circuit voltage refreshed: %dmV", m_openCircuitVoltage_mV);
     }
 
     // Startup capture: output is already OFF (natural Voc state), grab it directly
-    if (!m_ocvRefreshPending && m_outputState == OutputState::OFF && hasMeasurements() && areMeasurementsSettled() && m_openCircuitVoltage_mV <= 0)
+    if (!m_ocvRefreshPending && m_outputState == OutputState::OFF && hasMeasurements() && m_openCircuitVoltage_mV <= 0)
     {
         m_openCircuitVoltage_mV = getInVoltage_mV();
         ESP_LOGI(TAG, "Open-circuit voltage captured at startup: %dmV", m_openCircuitVoltage_mV);

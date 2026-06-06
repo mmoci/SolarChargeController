@@ -43,11 +43,6 @@ namespace DPSxDcConverterConfig
     static constexpr uint8_t  SLAVE_ADDRESS              {0x01};
     static constexpr uint16_t MESSAGE_TMO                {700};   // ms — DPS5005 observed response time ~450ms; 700ms gives comfortable margin
     static constexpr uint8_t  MAX_READS_BEFORE_WRITE     {2};     // reads between write cycles.
-    // The DPS takes ~1 full read cycle (~450ms) to reflect a new I_SET in the IOUT register.
-    // With value=1 the single read after each write is always stale → P&O computes false
-    // gradients and oscillates. With value=2 the first read is skipped (stale) and the
-    // second provides a settled measurement. areMeasurementsSettled() enforces this gate.
-    static constexpr uint8_t  SETTLE_READS_AFTER_WRITE   {2};     // reads required before measurements are considered settled
     // Delay before the first Modbus message after init(). The ESP32 UART TX pin
     // can glitch during boot, corrupting any partial frame the DPS was processing
     // from a previous session. This delay lets the DPS's frame-timeout expire so
@@ -69,8 +64,14 @@ namespace DPSxDcConverterConfig
     // Refresh open-circuit voltage every 30 minutes when measurements are valid, to adapt to changing panel conditions
     static constexpr unsigned long OPEN_CIRCUIT_VOLTAGE_REFRESH_RATE_MS {30 * 60 * 1000};
 
+    // If the panel is present but output current is very low, refresh OCV more aggressively (every 1 minute) to detect improving conditions sooner. 
+    // This prevents the system from getting stuck in a low-power state if conditions improve after startup or a period of low irradiance.
     static constexpr unsigned long LOW_POWER_OCV_COOLDOWN_MS {60 * 1000};
-}
+
+    static constexpr int LOW_OUTPUT_CURRENT_THRESHOLD_mA     {100};  // Threshold for "hasLowOutputCurrent" condition in OCV refresh logic
+    static constexpr int PANEL_PRESENT_MIN_OUTPUT_VOLTAGE_mV {5000}; // Floor for Vout comparison when output is unloaded or at startup
+    static constexpr int PANEL_PRESENT_VIN_HEADROOM_mV       {1000}; // Vin must exceed max(Vout, floor) by this margin to consider panel connected
+};
 
 /**
  * Important timing note:
@@ -101,7 +102,6 @@ class DPSxDcConverter : public Device, public ActuatorIf
     int getCurrent_mA() const {return m_outCurrent_mA;};
     unsigned long getLastUpdateTime() const {return m_lastUpdateTime;};
     uint8_t getReadsSinceLastWrite() const { return m_readsSinceLastWrite; }
-    bool areMeasurementsSettled() const { return m_readsSinceLastWrite >= DPSxDcConverterConfig::SETTLE_READS_AFTER_WRITE; }
 
     private:
     enum class Register : uint16_t

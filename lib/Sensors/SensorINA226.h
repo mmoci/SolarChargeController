@@ -66,18 +66,6 @@ class SensorINA226 : public Device, public SensorI2C, public MeasurementsIf
         return updated;
     }
 
-    /**
-     * @brief Returns true if the measurements reflect the currently applied setpoint.
-     * 
-     * @return true 
-     * @return false 
-     */
-    bool areMeasurementsSettled() const override
-    {
-        // INA226 is continuously measuring in the background, so readings are always settled with respect to the applied setpoint.
-        return true;
-    }
-
     private:
     /**
      * @brief Represents current value per 1bit. 
