@@ -66,6 +66,11 @@ class SensorINA226 : public Device, public SensorI2C, public MeasurementsIf
         return updated;
     }
 
+    bool isMeasurementSettled() const override
+    {
+        return true; // INA226 does not have a current settling time, so we assume it's always settled
+    }
+
     private:
     /**
      * @brief Represents current value per 1bit. 

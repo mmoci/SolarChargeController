@@ -38,9 +38,10 @@ class ChargeController
         Measurements pv{};
         Measurements battery{};
         int pvOpenCircuitVoltage_mV{};
-        bool pvValid{false};      // PV measurement is within stale timeout
-        bool batteryValid{false}; // Battery measurement is within stale timeout
-        bool updated{false};      // New PV reading arrived this cycle (implies pvValid)
+        bool pvValid{false};           // PV measurement is within stale timeout
+        bool batteryValid{false};      // Battery measurement is within stale timeout
+        bool updated{false};           // New reading arrived this cycle (implies pvValid)
+        bool measurementSettled{true}; // Output current matches set current within a small threshold, indicating that the system has stabilized after a change in control output
     };
 
     // Used to determine if charging is available (PV input vs battery voltage)

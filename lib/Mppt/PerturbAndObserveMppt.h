@@ -19,6 +19,7 @@ class PerturbAndObserveMppt : public MpptStrategyIf
     int getMaxSoftRampStep() const override {return MAX_STEP;} // Default ramping; can be overridden by specific strategies if needed
     int getMpptStep() const {return m_step;}
     void setMpptStep(int step) {m_step = step;}
+    void syncControl(int control) override;
 
     private:
     enum class Direction
@@ -39,8 +40,10 @@ class PerturbAndObserveMppt : public MpptStrategyIf
 
     // Minimum Vin increase above the pre-collapse operating point that indicates irradiance has increased
     // enough to invalidate the collapse ceiling. Sized to reject measurement noise (~100mV) while
-    // reliably detecting real irradiance changes (typically >500mV shift at same I_SET).
-    static constexpr int IRRADIANCE_INCREASE_VOLTAGE_MARGIN_mV{500};
+    // reliably detecting real irradiance changes (typically >400mV shift at same I_SET).
+    static constexpr int IRRADIANCE_INCREASE_VOLTAGE_MARGIN_mV{400};
+
+    static constexpr int KNEE_CONSECUTIVE_MIN_STEPS{3}; // Number of consecutive minimum steps at which to consider that we may be at the MPP knee and should be cautious about declaring a collapse
 
     // Previous measurements for gradient calculation and dynamic step sizing
     Measurements m_pvMeasurements{};
@@ -51,5 +54,6 @@ class PerturbAndObserveMppt : public MpptStrategyIf
     MpptGradient m_gradientData{};
     Direction m_direction{};
     int m_step{DEFAULT_STEP};
+    int m_consecutiveMinSteps{0}; // Counter for consecutive minimum steps, used to identify potential MPPT knee
     int m_openCircuitVoltage_mV{};
 };

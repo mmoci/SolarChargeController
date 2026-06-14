@@ -21,7 +21,7 @@ namespace DPSxDcConverterConfig
     //   IOUT               : 0.001A/bit  → register 5000 = 5.000A  (read display value)
     // MAX values represent the register value written at 100% control output.
     static constexpr int MAX_MPPT_VOLTAGE_CONTROL_VALUE   {5000}; // 50.00V in 0.01V/bit units
-    static constexpr int MAX_MPPT_CURRENT_CONTROL_VALUE   {5000}; // 5.000A in 0.001A/bit units
+    static constexpr int MAX_MPPT_CURRENT_CONTROL_VALUE   {3000}; // 3.000A in 0.001A/bit units
 
     constexpr int selectControlValueFromControlMode()
     {
@@ -37,12 +37,11 @@ namespace DPSxDcConverterConfig
     }   
 
     static constexpr int MAX_MPPT_CONTROL_VALUE     {selectControlValueFromControlMode()};
-    static constexpr int DEFAULT_MPPT_CONTROL_VALUE {MAX_MPPT_CONTROL_VALUE / 2};
 
     // DPS5005 factory default Modbus slave address = 1 (configurable on the device menu).
     static constexpr uint8_t  SLAVE_ADDRESS              {0x01};
     static constexpr uint16_t MESSAGE_TMO                {700};   // ms — DPS5005 observed response time ~450ms; 700ms gives comfortable margin
-    static constexpr uint8_t  MAX_READS_BEFORE_WRITE     {2};     // reads between write cycles.
+    static constexpr uint8_t  MAX_READS_BEFORE_WRITE     {1};     // reads between write cycles.
     // Delay before the first Modbus message after init(). The ESP32 UART TX pin
     // can glitch during boot, corrupting any partial frame the DPS was processing
     // from a previous session. This delay lets the DPS's frame-timeout expire so
@@ -57,20 +56,18 @@ namespace DPSxDcConverterConfig
     // The software CV controller is the primary voltage limit; this fires only if the
     // software fails. Tight enough to protect the battery, loose enough that normal
     // CV regulation noise does not trigger it.
-    static constexpr int OVP_CEILING_HEADROOM_BITS       {50};   // 50 × 0.01V/bit = 0.50V above battery maxVoltage
-    static constexpr uint16_t ERROR_RECOVERY_TMO         {10000}; // ms — pause duration after too many errors
-    static constexpr uint8_t  CONSECUTIVE_ERRORS_THRESHOLD {5};   // errors before triggering recovery pause
+    static constexpr int      OVP_CEILING_HEADROOM_BITS    {50};    // 50 × 0.01V/bit = 0.50V above battery maxVoltage
+    static constexpr uint16_t ERROR_RECOVERY_TMO           {10000}; // ms — pause duration after too many errors
+    static constexpr uint8_t  CONSECUTIVE_ERRORS_THRESHOLD {5};     // errors before triggering recovery pause
 
     // Refresh open-circuit voltage every 30 minutes when measurements are valid, to adapt to changing panel conditions
     static constexpr unsigned long OPEN_CIRCUIT_VOLTAGE_REFRESH_RATE_MS {30 * 60 * 1000};
 
-    // If the panel is present but output current is very low, refresh OCV more aggressively (every 1 minute) to detect improving conditions sooner. 
-    // This prevents the system from getting stuck in a low-power state if conditions improve after startup or a period of low irradiance.
-    static constexpr unsigned long LOW_POWER_OCV_COOLDOWN_MS {60 * 1000};
-
     static constexpr int LOW_OUTPUT_CURRENT_THRESHOLD_mA     {100};  // Threshold for "hasLowOutputCurrent" condition in OCV refresh logic
     static constexpr int PANEL_PRESENT_MIN_OUTPUT_VOLTAGE_mV {5000}; // Floor for Vout comparison when output is unloaded or at startup
     static constexpr int PANEL_PRESENT_VIN_HEADROOM_mV       {1000}; // Vin must exceed max(Vout, floor) by this margin to consider panel connected
+
+    static constexpr int CURRENT_SETTLE_THRESHOLD_mA         {5};   // Threshold for "isMeasurementSettled"
 };
 
 /**
@@ -101,7 +98,7 @@ class DPSxDcConverter : public Device, public ActuatorIf
     int getVoltage_mV() const {return m_outVoltage_mV;};
     int getCurrent_mA() const {return m_outCurrent_mA;};
     unsigned long getLastUpdateTime() const {return m_lastUpdateTime;};
-    uint8_t getReadsSinceLastWrite() const { return m_readsSinceLastWrite; }
+    bool isMeasurementSettled() const;
 
     private:
     enum class Register : uint16_t
@@ -177,6 +174,7 @@ class DPSxDcConverter : public Device, public ActuatorIf
     Timer m_messageTimer{};
     Timer m_startupTimer{};
     Timer m_openCircuitVoltageTimer{};
+    Timer m_measurementSettlingTimer{};
     std::deque<WriteRequest> m_writeRequestQueue{};
 
     // ===== Error Recovery Variables =====

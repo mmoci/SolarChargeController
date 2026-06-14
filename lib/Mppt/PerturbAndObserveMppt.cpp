@@ -10,6 +10,7 @@ void PerturbAndObserveMppt::init()
     m_voltageAtCeiling_mV = 0;
     m_collapsePointsCandidates.clear();
     m_step = DEFAULT_STEP;
+    m_consecutiveMinSteps = 0;
     m_direction = Direction::Up;
     m_pvMeasurements = {}; // Without this, ΔP<0 on first update (power dropped from end-of-cycle to 0 at startup) would flip direction to Down and keep MPPT stuck at 0%.
     m_gradientData = {};
@@ -17,7 +18,8 @@ void PerturbAndObserveMppt::init()
 
 void PerturbAndObserveMppt::update(Measurements pvMeasurements)
 {
-    bool directionFlipped{false};
+    bool directionFlipped {false};
+    int prevConsecutiveMinSteps {m_consecutiveMinSteps};
 
     long power_mW {pvMeasurements.voltage_mV * pvMeasurements.current_mA / 1000}; // Convert to mW to avoid overflow and match typical PV power units
     long m_power_mW {m_pvMeasurements.voltage_mV * m_pvMeasurements.current_mA / 1000}; // Previous power in mW
@@ -27,6 +29,9 @@ void PerturbAndObserveMppt::update(Measurements pvMeasurements)
     MpptGradient newGradient{0.0f, false};
 
     const int voltageCollapseThreshold_mV = m_openCircuitVoltage_mV * PvArrayConfig::VOLTAGE_COLLAPSE_THRESHOLD_PERCENT / 100;
+
+    // Detect voltage collapse: if voltage drops below a percentage of Voc, it's likely we've overshot the MPP and entered the collapse region. 
+    // Respond by reducing control aggressively and setting a ceiling to prevent further collapse until we detect conditions have improved (e.g. irradiance increase).
     if(m_openCircuitVoltage_mV > 0 && pvMeasurements.voltage_mV < voltageCollapseThreshold_mV)
     {
         // Only update ceiling and pre-collapse Vin from a valid (non-collapsed) previous measurement.
@@ -44,9 +49,10 @@ void PerturbAndObserveMppt::update(Measurements pvMeasurements)
         m_pvMeasurements = pvMeasurements; // Update measurements to prevent repeated large steps on every update during a collapse event
         ESP_LOGW(TAG, "Voltage dropped below %d%% of Voc (%dmV) — emergency step to control=%.2f%% (ceiling=%.2f%%)",
                  PvArrayConfig::VOLTAGE_COLLAPSE_THRESHOLD_PERCENT, voltageCollapseThreshold_mV, m_control / 10.0 , m_controlCollapseCeiling / 10.0);
-        return; // Skip normal P&O logic during a collapse event to avoid overreacting to noise in the critical low-voltage region
+        return; 
     }
 
+    // Only update gradient and direction if voltage change is large enough to yield a reliable gradient measurement.
     if(std::abs(deltaVoltage_mV) >= MIN_DELTA_VOLTAGE_mV)
     {
         // Scale step proportionally to |dP/dV|, clamped to [MIN_STEP, MAX_STEP]
@@ -54,22 +60,31 @@ void PerturbAndObserveMppt::update(Measurements pvMeasurements)
         newGradient.gradient = std::abs(static_cast<float>(deltaPower_mW) / static_cast<float>(deltaVoltage_mV));
         m_step = constrain(static_cast<int>(K_STEP * newGradient.gradient), MIN_STEP, MAX_STEP);
 
+        // Update direction: if power increased, keep same direction; if power decreased, flip direction
         if(deltaPower_mW < 0)
         {
             m_direction = (m_direction == Direction::Up) ? Direction::Down : Direction::Up;
             directionFlipped = true;
         }
+
+        // Increment counter if we're stepping up at minimum step size, which can indicate we're at the knee; reset otherwise
+        (m_step == MIN_STEP && m_direction == Direction::Up) ? m_consecutiveMinSteps++ : m_consecutiveMinSteps = 0;
     }
     else
     {
-        // ΔV too small for reliable gradient — skip gradient/direction update but still apply current step
-        // m_pvMeasurements is updated unconditionally at the end, preventing gradient spikes later
+        newGradient.valid = false;
+        ESP_LOGD(TAG, "ΔV (%dmV) below threshold (%dmV) — skipping gradient and direction update to avoid noise, control=%.2f%%",
+             std::abs(deltaVoltage_mV), MIN_DELTA_VOLTAGE_mV, m_control / 10.0);
     }
 
     if(m_direction == Direction::Up)
     {
-        if(deltaVoltage_mV < -KNEE_DELTA_VOLTAGE_THRESHOLD_mV && m_step == MIN_STEP && m_control < m_controlCollapseCeiling)
+        // Detect knee: if we're stepping up at minimum step size and voltage drops significantly for several consecutive steps,
+        // it's likely we've hit the knee and should set a ceiling to avoid collapse.
+        if(deltaVoltage_mV < -KNEE_DELTA_VOLTAGE_THRESHOLD_mV && 
+            m_step == MIN_STEP && prevConsecutiveMinSteps >= KNEE_CONSECUTIVE_MIN_STEPS && m_control < m_controlCollapseCeiling)
         {
+            m_consecutiveMinSteps = 0; // Reset counter after detecting a knee
             m_collapsePointsCandidates.add({m_control, pvMeasurements.voltage_mV});
             m_controlCollapseCeiling = m_control;
             m_voltageAtCeiling_mV = pvMeasurements.voltage_mV;
@@ -82,9 +97,8 @@ void PerturbAndObserveMppt::update(Measurements pvMeasurements)
             m_control = std::min(m_control + m_step, m_controlCollapseCeiling);
         }
 
-        // Detect irradiance increase: if we're hitting the ceiling and Vin is significantly
-        // higher than it was just before the last collapse (same I_SET, higher voltage = panel
-        // can deliver more), the old ceiling is no longer valid.
+        // Detect irradiance increase: if we're hitting the ceiling and Vin is significantly higher than it was just before the last collapse 
+        // the old ceiling is no longer valid, reset it.
         if(m_controlCollapseCeiling < MAX_CONTROL_VALUE && m_control == m_controlCollapseCeiling && m_voltageAtCeiling_mV > 0 &&
            pvMeasurements.voltage_mV > m_voltageAtCeiling_mV + IRRADIANCE_INCREASE_VOLTAGE_MARGIN_mV)
         {
@@ -100,8 +114,11 @@ void PerturbAndObserveMppt::update(Measurements pvMeasurements)
         const int peakControl{m_control};
         m_control -= m_step;
 
-        if(directionFlipped && m_step == MIN_STEP && peakControl < m_controlCollapseCeiling)
+        // Detect knee: if direction flipped to Down and there were several consecutive minimum steps before the flip, it's likely we've hit the knee
+        // and should set a ceiling to avoid collapse.
+        if(directionFlipped && m_step == MIN_STEP && prevConsecutiveMinSteps >= KNEE_CONSECUTIVE_MIN_STEPS && peakControl < m_controlCollapseCeiling)
         {
+            m_consecutiveMinSteps = 0; // Reset counter after detecting a knee
             m_controlCollapseCeiling = peakControl;
             m_voltageAtCeiling_mV = m_pvMeasurements.voltage_mV;
             m_collapsePointsCandidates.add({peakControl, m_pvMeasurements.voltage_mV});
@@ -143,5 +160,15 @@ void PerturbAndObserveMppt::setOpenCircuitVoltage(int openCircuitVoltage_mV)
         m_collapsePointsCandidates.clear();
         m_openCircuitVoltage_mV = openCircuitVoltage_mV;
         ESP_LOGI(TAG, "Open-circuit voltage set to %dmV", m_openCircuitVoltage_mV);
+    }
+}
+
+void PerturbAndObserveMppt::syncControl(int control)
+{ 
+    if(control != m_control && control >= MIN_CONTROL_VALUE && control <= MAX_CONTROL_VALUE)
+    {
+        ESP_LOGI(TAG, "Syncing internal control from %.2f%% to %.2f%% to match actual control being applied by ChargeController",
+                 m_control / 10.0, control / 10.0);
+        m_control = control;
     }
 }

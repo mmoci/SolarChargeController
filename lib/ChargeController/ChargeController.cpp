@@ -53,6 +53,8 @@ void ChargeController::update()
 
     m_mpptControl = limitedSetpoint;
     m_actuator->applyControl(std::max(limitedSetpoint, 1));
+    if(m_mpptStrategy)
+        m_mpptStrategy->syncControl(m_mpptControl);
 }
 
 bool ChargeController::updatePvAvailability(Measurements pvMeasurements, Measurements batteryMeasurements)
@@ -147,9 +149,10 @@ ChargeController::MeasurementSnapshot ChargeController::sampleMeasurements()
     
     snapshot.battery.voltage_mV = m_batteryMeasurements->getVoltage_mV();
     snapshot.battery.current_mA = m_batteryMeasurements->getCurrent_mA();
-    snapshot.pvValid      = m_pvMeasurements->isMeasurementValid();
-    snapshot.batteryValid = m_batteryMeasurements->isMeasurementValid();
-    snapshot.updated = snapshot.pvValid && m_pvMeasurements->isMeasurementUpdated();
+    snapshot.pvValid            = m_pvMeasurements->isMeasurementValid();
+    snapshot.batteryValid       = m_batteryMeasurements->isMeasurementValid();
+    snapshot.updated            = snapshot.pvValid && m_pvMeasurements->isMeasurementUpdated();
+    snapshot.measurementSettled = snapshot.pvValid && m_pvMeasurements->isMeasurementSettled();
     return snapshot;
 }
 
@@ -181,7 +184,7 @@ int ChargeController::computeDesiredSetpoint(MeasurementSnapshot snapshot)
 
     if (snapshot.updated)
     {
-        const bool isOutputEnabled = m_actuator->isOutputEnabled();
+        const bool isOutputEnabled {m_actuator->isOutputEnabled()};
 
         if (isOutputEnabled && !m_wasOutputEnabled && m_wasChargingAllowed)
         {
@@ -190,11 +193,19 @@ int ChargeController::computeDesiredSetpoint(MeasurementSnapshot snapshot)
         }
         m_wasOutputEnabled = isOutputEnabled;
 
-        if (isOutputEnabled && m_wasChargingAllowed && !m_wasVoltageLimitActive)
+        if (isOutputEnabled && m_wasChargingAllowed && !m_wasVoltageLimitActive && snapshot.measurementSettled)
         {
             m_mpptStrategy->update(snapshot.pv);
             m_mpptControl = softRampControl(m_mpptStrategy->getMpptControl(), m_mpptStrategy->getMaxSoftRampStep());
         }
+        else if (!isOutputEnabled)
+        {
+            ESP_LOGD(TAG, "Output disabled — holding control at %.2f%%", m_mpptControl / static_cast<float>(MpptStrategyIf::MAX_CONTROL_VALUE) * 100);
+        }   
+        else if (!snapshot.measurementSettled)
+        {
+            ESP_LOGD(TAG, "Current not settled — holding control at %.2f%%", m_mpptControl / static_cast<float>(MpptStrategyIf::MAX_CONTROL_VALUE) * 100);
+        }  
     }
 
     return m_mpptControl;

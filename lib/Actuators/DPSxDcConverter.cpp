@@ -79,8 +79,8 @@ void DPSxDcConverter::applyControl(int controlValue)
     // Floor: only relevant in VOLTAGE_SETPOINT mode. U_SET must exceed Vbatt to push current into the battery; if the control value is too low, the DPS cannot regulate and the system oscillates.
     if (m_controlMode == ControlMode::VOLTAGE_SETPOINT && controlValue > 0 && m_outVoltage_mV > 0)
     {
-        const int battFloor = m_outVoltage_mV / 10 + DPSxDcConverterConfig::VOLTAGE_HEADROOM_BITS;
-        setPointValue = std::max(setPointValue, battFloor);
+        const int batteryFloor = m_outVoltage_mV / 10 + DPSxDcConverterConfig::VOLTAGE_HEADROOM_BITS;
+        setPointValue = std::max(setPointValue, batteryFloor);
     }
 
     if(m_setPointValue != setPointValue)
@@ -96,33 +96,31 @@ void DPSxDcConverter::updateOpenCircuitVoltage()
 
     const bool panelPresent = (m_inVoltage_mV > std::max(m_outVoltage_mV, DPSxDcConverterConfig::PANEL_PRESENT_MIN_OUTPUT_VOLTAGE_mV) 
                                 + DPSxDcConverterConfig::PANEL_PRESENT_VIN_HEADROOM_mV);
-    const bool hasLowOutputCurrent = hasMeasurements() && m_outCurrent_mA < DPSxDcConverterConfig::LOW_OUTPUT_CURRENT_THRESHOLD_mA;
     
-    // Refresh open-circuit voltage if the timer has elapsed or if the panel is present but output current is very low
-    if (!m_ocvRefreshPending && m_outputState == OutputState::ON &&
-        ((m_openCircuitVoltageTimer.getDuration() >= DPSxDcConverterConfig::OPEN_CIRCUIT_VOLTAGE_REFRESH_RATE_MS) ||
-        (panelPresent && hasLowOutputCurrent && m_openCircuitVoltageTimer.getDuration() >= DPSxDcConverterConfig::LOW_POWER_OCV_COOLDOWN_MS))) 
+    // Refresh open-circuit voltage if the timer has elapsed and conditions indicate the panel is present.
+    if (!m_ocvRefreshPending && m_outputState == OutputState::ON && panelPresent &&
+        ((m_openCircuitVoltageTimer.getDuration() >= DPSxDcConverterConfig::OPEN_CIRCUIT_VOLTAGE_REFRESH_RATE_MS))) 
     {
         m_ocvRefreshPending = true; // Flag to indicate that an OCV refresh is pending
         enableOutput(false, true);  // Urgent OFF to let Vin rise to Voc
         m_openCircuitVoltageTimer.trigger();
-        ESP_LOGI(TAG, "Output disabled to refresh open-circuit voltage (panelPresent=%d, hasLowOutputCurrent=%d)", panelPresent, hasLowOutputCurrent);
+        ESP_LOGI(TAG, "Output disabled to refresh open-circuit voltage");
     }
 
     // Once output is disabled, capture the open-circuit voltage and re-enable output
-    if (m_ocvRefreshPending && m_outputState == OutputState::OFF && hasMeasurements() && m_inVoltage_mV > 0)
+    if (m_ocvRefreshPending && m_outputState == OutputState::OFF && hasMeasurements() && panelPresent)
     {
         m_openCircuitVoltage_mV = getInVoltage_mV();
         m_ocvRefreshPending = false;
         enableOutput(true);
-        ESP_LOGI(TAG, "Open-circuit voltage refreshed: %dmV", m_openCircuitVoltage_mV);
+        ESP_LOGI(TAG, "Open-circuit voltage refreshed: %dmV", m_openCircuitVoltage_mV.value_or(0));
     }
 
     // Startup capture: output is already OFF (natural Voc state), grab it directly
-    if (!m_ocvRefreshPending && m_outputState == OutputState::OFF && hasMeasurements() && m_openCircuitVoltage_mV <= 0)
+    if (!m_ocvRefreshPending && m_outputState == OutputState::OFF && hasMeasurements() && !m_openCircuitVoltage_mV.has_value())
     {
         m_openCircuitVoltage_mV = getInVoltage_mV();
-        ESP_LOGI(TAG, "Open-circuit voltage captured at startup: %dmV", m_openCircuitVoltage_mV);
+        ESP_LOGI(TAG, "Open-circuit voltage captured at startup: %dmV", m_openCircuitVoltage_mV.value_or(0));
     }
 }
 
@@ -170,7 +168,7 @@ void DPSxDcConverter::handleModbusMessages()
     switch(m_messageState)
     {
         case ModbusState::IDLE:
-        if (!m_writeRequestQueue.empty()) // Prioritise writes if there are too many reads without a write, but don't interrupt an in-flight write
+        if (!m_writeRequestQueue.empty()) // If there are pending write requests, prioritize them over reads
         {
             const auto& request = m_writeRequestQueue.front();
 
@@ -304,6 +302,12 @@ void DPSxDcConverter::enqueWriteRequest(Register address, uint16_t data, bool ur
         m_writeRequestQueue.push_front({address, data, urgent});
     else
         m_writeRequestQueue.push_back({address, data, urgent});
+}
+
+bool DPSxDcConverter::isMeasurementSettled() const
+{
+    // Check if the absolute difference between the measured current and the setpoint is within the defined threshold
+    return std::abs(m_outCurrent_mA - m_setPointValue) < DPSxDcConverterConfig::CURRENT_SETTLE_THRESHOLD_mA;
 }
 
 // ----------------------------------

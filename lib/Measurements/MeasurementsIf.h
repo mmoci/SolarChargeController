@@ -9,6 +9,7 @@ class MeasurementsIf
     virtual std::optional<int> getOpenCircuitVoltage_mV() const {return std::nullopt;} // Only relevant for PV measurements with input voltage regulation strategy, default is std::nullopt for non-PV or non-regulating actuators
     virtual bool isMeasurementValid() const {return true;}
     virtual bool isMeasurementUpdated() {return false;}
+    virtual bool isMeasurementSettled() const {return true;}
 
     virtual ~MeasurementsIf() = default;
 
