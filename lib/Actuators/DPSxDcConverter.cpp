@@ -25,11 +25,13 @@ void DPSxDcConverter::init()
     
     m_errorRecoveryTimer.reset();
     m_messageTimer.reset();
+    m_measurementSettlingTimer.reset();
     m_startupTimer.trigger();
     m_openCircuitVoltageTimer.trigger();
 
     m_startupComplete = false;
     m_ocvRefreshPending = false;
+    m_measurementSettled = true;
 }
 
 void DPSxDcConverter::update()
@@ -165,6 +167,9 @@ void DPSxDcConverter::handleModbusMessages()
 {
     const uint16_t nrOfRegisters{NUM_OF_REGISTERS_TO_READ};
 
+    m_measurementSettlingTimer.update();
+    const bool isSettling = !m_measurementSettled &&  m_measurementSettlingTimer.getDuration() < DPSxDcConverterConfig::SETTLE_DELAY_MS;
+
     switch(m_messageState)
     {
         case ModbusState::IDLE:
@@ -178,17 +183,31 @@ void DPSxDcConverter::handleModbusMessages()
                 m_activeWriteRegister = request.address;
                 m_activeWriteData     = request.data;
                 m_readsSinceLastWrite = 0;
+
+                // Invalidate measurements as soon as a setpoint write is dispatched
+                if (m_activeWriteRegister == Register::I_SET || m_activeWriteRegister == Register::U_SET)
+                    m_measurementSettled = false;
             }
-            else
+            else if(!isSettling)
             {
                 m_activeMessageType = ModbusMessageType::READ;
                 ++m_readsSinceLastWrite;
             }
+            else
+            {
+                m_activeMessageType = ModbusMessageType::NONE;
+                break;
+            }
         }
-        else
+        else if(!isSettling)
         {
             m_activeMessageType = ModbusMessageType::READ;
             ++m_readsSinceLastWrite;
+        }
+        else
+        {
+            m_activeMessageType = ModbusMessageType::NONE;
+            break;
         }
             
         clearRxLine();
@@ -237,10 +256,11 @@ void DPSxDcConverter::handleModbusMessages()
 
                     m_consecutiveErrors = 0; // Reset error count on successful read
                     m_lastUpdateTime = millis(); // Update last successful read time
+                    m_measurementSettled = true; // Mark measurements as settled after a successful read
+                    m_messageTimer.reset();
                     ESP_LOGD(TAG, "Read OK — OutputState=%s Vout=%dmV Iout=%dmA Vin=%dmV", 
                         m_outputState == OutputState::ON ? "ON" : "OFF", m_outVoltage_mV, m_outCurrent_mA, m_inVoltage_mV);
                     m_messageState = ModbusState::IDLE;
-                    m_messageTimer.reset();
                     break;
                 }
             }
@@ -248,15 +268,26 @@ void DPSxDcConverter::handleModbusMessages()
             {
                 if(receiveRegisterWriteRsp(m_activeWriteRegister, m_activeWriteData))
                 {
-                    m_writeRequestQueue.pop_front(); // Remove the completed write request from the queue
-                    m_consecutiveErrors = 0; // Reset error count on successful write
                     // Do NOT update m_lastUpdateTime here — writes don't produce measurement data.
                     // hasMeasurements() must stay false until the first successful READ so that
                     // isMeasurementValid() doesn't return true with Vbatt=0, which would trip
                     // BatteryManager into Fault before any real voltage has been observed.
+
+                    m_writeRequestQueue.pop_front(); // Remove the completed write request from the queue
+                    m_consecutiveErrors = 0; // Reset error count on successful write
+
                     ESP_LOGD(TAG, "Write OK \u2014 register %s value=%d", registerAddressToString(m_activeWriteRegister).c_str(), m_activeWriteData);
-                    m_messageState = ModbusState::IDLE;
+                    
                     m_messageTimer.reset();
+
+                    // Start settle timer so the next read is only accepted after hardware has responded to the new setpoint
+                    if (m_activeWriteRegister == Register::I_SET || m_activeWriteRegister == Register::U_SET)
+                    {
+                        m_measurementSettlingTimer.trigger();
+                        ESP_LOGD(TAG, "Write ACK for %s — settle timer started (%ums)", registerAddressToString(m_activeWriteRegister).c_str(), DPSxDcConverterConfig::SETTLE_DELAY_MS);
+                    }
+
+                    m_messageState = ModbusState::IDLE;
                     break;
                 }
             }
@@ -302,12 +333,6 @@ void DPSxDcConverter::enqueWriteRequest(Register address, uint16_t data, bool ur
         m_writeRequestQueue.push_front({address, data, urgent});
     else
         m_writeRequestQueue.push_back({address, data, urgent});
-}
-
-bool DPSxDcConverter::isMeasurementSettled() const
-{
-    // Check if the absolute difference between the measured current and the setpoint is within the defined threshold
-    return std::abs(m_outCurrent_mA - m_setPointValue) < DPSxDcConverterConfig::CURRENT_SETTLE_THRESHOLD_mA;
 }
 
 // ----------------------------------

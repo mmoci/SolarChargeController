@@ -67,7 +67,7 @@ namespace DPSxDcConverterConfig
     static constexpr int PANEL_PRESENT_MIN_OUTPUT_VOLTAGE_mV {5000}; // Floor for Vout comparison when output is unloaded or at startup
     static constexpr int PANEL_PRESENT_VIN_HEADROOM_mV       {1000}; // Vin must exceed max(Vout, floor) by this margin to consider panel connected
 
-    static constexpr int CURRENT_SETTLE_THRESHOLD_mA         {5};   // Threshold for "isMeasurementSettled"
+    static constexpr uint16_t SETTLE_DELAY_MS                {500};
 };
 
 /**
@@ -98,7 +98,7 @@ class DPSxDcConverter : public Device, public ActuatorIf
     int getVoltage_mV() const {return m_outVoltage_mV;};
     int getCurrent_mA() const {return m_outCurrent_mA;};
     unsigned long getLastUpdateTime() const {return m_lastUpdateTime;};
-    bool isMeasurementSettled() const;
+    bool isMeasurementSettled() const {return m_measurementSettled;}
 
     private:
     enum class Register : uint16_t
@@ -169,6 +169,7 @@ class DPSxDcConverter : public Device, public ActuatorIf
     uint16_t m_activeWriteData{};
     OutputState m_outputState{OutputState::OFF};
     bool m_startupComplete{}; ///< Blocks Modbus until STARTUP_DELAY_MS has elapsed after init()
+    bool m_measurementSettled{true};
     int  m_uSetVoltage_bits{DPSxDcConverterConfig::MAX_MPPT_VOLTAGE_CONTROL_VALUE}; ///< Runtime U_SET target (device max until setBatteryProfile() is called)
     uint8_t m_readsSinceLastWrite{};
     Timer m_messageTimer{};
