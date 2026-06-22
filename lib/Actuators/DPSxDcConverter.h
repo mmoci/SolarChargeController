@@ -60,14 +60,11 @@ namespace DPSxDcConverterConfig
     static constexpr uint16_t ERROR_RECOVERY_TMO           {10000}; // ms — pause duration after too many errors
     static constexpr uint8_t  CONSECUTIVE_ERRORS_THRESHOLD {5};     // errors before triggering recovery pause
 
-    // Refresh open-circuit voltage every 30 minutes when measurements are valid, to adapt to changing panel conditions
-    static constexpr unsigned long OPEN_CIRCUIT_VOLTAGE_REFRESH_RATE_MS {30 * 60 * 1000};
+    static constexpr uint16_t SETTLE_DELAY_MS                {500};
 
     static constexpr int LOW_OUTPUT_CURRENT_THRESHOLD_mA     {100};  // Threshold for "hasLowOutputCurrent" condition in OCV refresh logic
     static constexpr int PANEL_PRESENT_MIN_OUTPUT_VOLTAGE_mV {5000}; // Floor for Vout comparison when output is unloaded or at startup
     static constexpr int PANEL_PRESENT_VIN_HEADROOM_mV       {1000}; // Vin must exceed max(Vout, floor) by this margin to consider panel connected
-
-    static constexpr uint16_t SETTLE_DELAY_MS                {500};
 };
 
 /**
@@ -162,19 +159,18 @@ class DPSxDcConverter : public Device, public ActuatorIf
     int m_outCurrent_mA{};
     int m_setPointValue{};
     std::optional<int> m_openCircuitVoltage_mV{};  // nullopt until first valid Voc capture
-    bool m_ocvRefreshPending{false}; // Flag to indicate that an OCV refresh is pending, which temporarily disables output until the refresh is complete. This prevents the DPS from pushing current into the battery during the OCV measurement, which would cause the voltage to drop and yield an invalid reading.
     ModbusState m_messageState{};
     ModbusMessageType m_activeMessageType{};
     Register m_activeWriteRegister{}; 
     uint16_t m_activeWriteData{};
     OutputState m_outputState{OutputState::OFF};
+    bool m_outputStateChanged{}; // Tracks whether the output state has changed since the last successful read, to trigger an urgent write if needed
     bool m_startupComplete{}; ///< Blocks Modbus until STARTUP_DELAY_MS has elapsed after init()
     bool m_measurementSettled{true};
     int  m_uSetVoltage_bits{DPSxDcConverterConfig::MAX_MPPT_VOLTAGE_CONTROL_VALUE}; ///< Runtime U_SET target (device max until setBatteryProfile() is called)
     uint8_t m_readsSinceLastWrite{};
     Timer m_messageTimer{};
     Timer m_startupTimer{};
-    Timer m_openCircuitVoltageTimer{};
     Timer m_measurementSettlingTimer{};
     std::deque<WriteRequest> m_writeRequestQueue{};
 

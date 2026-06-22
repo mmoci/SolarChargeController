@@ -14,6 +14,7 @@ public:
     int getMpptControl() const override { return m_control; }
     void setOpenCircuitVoltage(int /*voc_mV*/) override {}
     int getUpdateCount() const { return m_updateCount; }
+    void syncControl(int /*control*/) override {}
 private:
     int m_control{MIN_CONTROL_VALUE};
     int m_updateCount{};
@@ -101,7 +102,7 @@ TEST_F(ChargeControllerTest, StopsChargingWhenPVPowerUnavailable)
 }
 
 // Test handles stale PV measurements
-TEST_F(ChargeControllerTest, HandlesStaleVmeasurements)
+TEST_F(ChargeControllerTest, HandlesStalePVMeasurements)
 {
     pvMeasurements.setVoltage_mV(18000);
     pvMeasurements.setCurrent_mA(5000);

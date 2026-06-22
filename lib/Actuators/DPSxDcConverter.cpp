@@ -13,7 +13,8 @@ void DPSxDcConverter::init()
     m_lastUpdateTime      = 0;
     m_consecutiveErrors   = 0;
     m_pauseRetrying       = false;
-    m_outputState         = OutputState::OFF;
+    m_outputState         = OutputState::ON;
+    m_outputStateChanged  = false;
     m_setPointValue       = DPSxDcConverterConfig::MAX_MPPT_CURRENT_CONTROL_VALUE;
 
     // Enqueue initial writes to ensure a known safe state on startup: output disabled, OCP ceiling set, and U_SET at a safe voltage. 
@@ -25,12 +26,10 @@ void DPSxDcConverter::init()
     
     m_errorRecoveryTimer.reset();
     m_messageTimer.reset();
-    m_measurementSettlingTimer.reset();
+    m_measurementSettlingTimer.trigger();
     m_startupTimer.trigger();
-    m_openCircuitVoltageTimer.trigger();
 
     m_startupComplete = false;
-    m_ocvRefreshPending = false;
     m_measurementSettled = true;
 }
 
@@ -94,35 +93,21 @@ void DPSxDcConverter::applyControl(int controlValue)
 
 void DPSxDcConverter::updateOpenCircuitVoltage()
 {
-    m_openCircuitVoltageTimer.update();
-
-    const bool panelPresent = (m_inVoltage_mV > std::max(m_outVoltage_mV, DPSxDcConverterConfig::PANEL_PRESENT_MIN_OUTPUT_VOLTAGE_mV) 
-                                + DPSxDcConverterConfig::PANEL_PRESENT_VIN_HEADROOM_mV);
-    
-    // Refresh open-circuit voltage if the timer has elapsed and conditions indicate the panel is present.
-    if (!m_ocvRefreshPending && m_outputState == OutputState::ON && panelPresent &&
-        ((m_openCircuitVoltageTimer.getDuration() >= DPSxDcConverterConfig::OPEN_CIRCUIT_VOLTAGE_REFRESH_RATE_MS))) 
+    // Output changed to OFF: capture Voc if Vin indicates a panel is actually present.
+    // Guards against storing backfeed voltage or noise as Voc when no panel is connected.
+    if (m_outputState == OutputState::OFF && m_outputStateChanged && hasMeasurements())
     {
-        m_ocvRefreshPending = true; // Flag to indicate that an OCV refresh is pending
-        enableOutput(false, true);  // Urgent OFF to let Vin rise to Voc
-        m_openCircuitVoltageTimer.trigger();
-        ESP_LOGI(TAG, "Output disabled to refresh open-circuit voltage");
-    }
-
-    // Once output is disabled, capture the open-circuit voltage and re-enable output
-    if (m_ocvRefreshPending && m_outputState == OutputState::OFF && hasMeasurements() && panelPresent)
-    {
-        m_openCircuitVoltage_mV = getInVoltage_mV();
-        m_ocvRefreshPending = false;
-        enableOutput(true);
-        ESP_LOGI(TAG, "Open-circuit voltage refreshed: %dmV", m_openCircuitVoltage_mV.value_or(0));
-    }
-
-    // Startup capture: output is already OFF (natural Voc state), grab it directly
-    if (!m_ocvRefreshPending && m_outputState == OutputState::OFF && hasMeasurements() && !m_openCircuitVoltage_mV.has_value())
-    {
-        m_openCircuitVoltage_mV = getInVoltage_mV();
-        ESP_LOGI(TAG, "Open-circuit voltage captured at startup: %dmV", m_openCircuitVoltage_mV.value_or(0));
+        const bool panelPresent = (m_inVoltage_mV > std::max(m_outVoltage_mV, DPSxDcConverterConfig::PANEL_PRESENT_MIN_OUTPUT_VOLTAGE_mV)
+                                    + DPSxDcConverterConfig::PANEL_PRESENT_VIN_HEADROOM_mV);
+        if (panelPresent)
+        {
+            m_openCircuitVoltage_mV = getInVoltage_mV();
+            ESP_LOGI(TAG, "Open-circuit voltage captured: %dmV", m_openCircuitVoltage_mV.value_or(0));
+        }
+        else
+        {
+            ESP_LOGD(TAG, "Output OFF but panel not present (Vin=%dmV) — skipping Voc capture", m_inVoltage_mV);
+        }
     }
 }
 
@@ -168,27 +153,39 @@ void DPSxDcConverter::handleModbusMessages()
     const uint16_t nrOfRegisters{NUM_OF_REGISTERS_TO_READ};
 
     m_measurementSettlingTimer.update();
-    const bool isSettling = !m_measurementSettled &&  m_measurementSettlingTimer.getDuration() < DPSxDcConverterConfig::SETTLE_DELAY_MS;
+    const bool isSettled = m_measurementSettlingTimer.getDuration() >= DPSxDcConverterConfig::SETTLE_DELAY_MS;
 
     switch(m_messageState)
     {
         case ModbusState::IDLE:
-        if (!m_writeRequestQueue.empty()) // If there are pending write requests, prioritize them over reads
         {
-            const auto& request = m_writeRequestQueue.front();
-
-            if(request.urgent || m_readsSinceLastWrite >= DPSxDcConverterConfig::MAX_READS_BEFORE_WRITE)
+            if (!m_writeRequestQueue.empty()) // If there are pending write requests, prioritize them over reads
             {
-                m_activeMessageType   = ModbusMessageType::WRITE;
-                m_activeWriteRegister = request.address;
-                m_activeWriteData     = request.data;
-                m_readsSinceLastWrite = 0;
+                const auto& request = m_writeRequestQueue.front();
 
-                // Invalidate measurements as soon as a setpoint write is dispatched
-                if (m_activeWriteRegister == Register::I_SET || m_activeWriteRegister == Register::U_SET)
-                    m_measurementSettled = false;
+                if(request.urgent || m_readsSinceLastWrite >= DPSxDcConverterConfig::MAX_READS_BEFORE_WRITE)
+                {
+                    m_activeMessageType   = ModbusMessageType::WRITE;
+                    m_activeWriteRegister = request.address;
+                    m_activeWriteData     = request.data;
+                    m_readsSinceLastWrite = 0;
+
+                    // Invalidate measurements as soon as a setpoint write is dispatched
+                    if (m_activeWriteRegister == Register::I_SET || m_activeWriteRegister == Register::U_SET)
+                        m_measurementSettled = false;
+                }
+                else if(isSettled)
+                {
+                    m_activeMessageType = ModbusMessageType::READ;
+                    ++m_readsSinceLastWrite;
+                }
+                else
+                {
+                    m_activeMessageType = ModbusMessageType::NONE;
+                    break;
+                }
             }
-            else if(!isSettling)
+            else if(isSettled)
             {
                 m_activeMessageType = ModbusMessageType::READ;
                 ++m_readsSinceLastWrite;
@@ -198,45 +195,35 @@ void DPSxDcConverter::handleModbusMessages()
                 m_activeMessageType = ModbusMessageType::NONE;
                 break;
             }
-        }
-        else if(!isSettling)
-        {
-            m_activeMessageType = ModbusMessageType::READ;
-            ++m_readsSinceLastWrite;
-        }
-        else
-        {
-            m_activeMessageType = ModbusMessageType::NONE;
-            break;
-        }
-            
-        clearRxLine();
+                
+            clearRxLine();
 
-        // sendRegisterReadReq and sendRegisterWriteReq could be joined into same function, they have same signiture.
-        // Difference is that sendRegisterReadReq requires nrOfRegisters while other requires data to be written
-        if(m_activeMessageType == ModbusMessageType::READ)
-        {
-            if(sendRegisterReadReq(Register::UOUT, nrOfRegisters) != FRAME_SIZE)
+            // sendRegisterReadReq and sendRegisterWriteReq could be joined into same function, they have same signiture.
+            // Difference is that sendRegisterReadReq requires nrOfRegisters while other requires data to be written
+            if(m_activeMessageType == ModbusMessageType::READ)
             {
-                m_messageState = ModbusState::ERROR;
-                ++m_consecutiveErrors;
-                ESP_LOGE(TAG, "Failed to send read request (error #%d)", m_consecutiveErrors);
-                break;
+                if(sendRegisterReadReq(Register::UOUT, nrOfRegisters) != FRAME_SIZE)
+                {
+                    m_messageState = ModbusState::ERROR;
+                    ++m_consecutiveErrors;
+                    ESP_LOGE(TAG, "Failed to send read request (error #%d)", m_consecutiveErrors);
+                    break;
+                }
             }
-        }
-        else
-        {
-            if(sendRegisterWriteReq(m_activeWriteRegister, m_activeWriteData) != FRAME_SIZE)
+            else if(m_activeMessageType == ModbusMessageType::WRITE)
             {
-                m_messageState = ModbusState::ERROR;
-                ++m_consecutiveErrors;
-                ESP_LOGE(TAG, "Failed to send write request (error #%d)", m_consecutiveErrors);
-                break;
+                if(sendRegisterWriteReq(m_activeWriteRegister, m_activeWriteData) != FRAME_SIZE)
+                {
+                    m_messageState = ModbusState::ERROR;
+                    ++m_consecutiveErrors;
+                    ESP_LOGE(TAG, "Failed to send write request (error #%d)", m_consecutiveErrors);
+                    break;
+                }
             }
+                
+            m_messageState = ModbusState::WAITING;
+            m_messageTimer.trigger();
         }
-            
-        m_messageState = ModbusState::WAITING;
-        m_messageTimer.trigger();
         break;
 
         case ModbusState::WAITING:
@@ -252,7 +239,10 @@ void DPSxDcConverter::handleModbusMessages()
                     m_outVoltage_mV = buffer[0] * 10;
                     m_outCurrent_mA = buffer[1];  // Different resolution IOUT: 0.001A/bit → 1 bit = 1mA
                     m_inVoltage_mV  = buffer[3] * 10;
-                    m_outputState   = (buffer[7] & 0x0001) ? OutputState::ON : OutputState::OFF;
+
+                    const OutputState prevOutputState = m_outputState;
+                    m_outputState = (buffer[7] & 0x0001) ? OutputState::ON : OutputState::OFF;
+                    m_outputStateChanged = (prevOutputState != m_outputState);
 
                     m_consecutiveErrors = 0; // Reset error count on successful read
                     m_lastUpdateTime = millis(); // Update last successful read time
@@ -264,7 +254,7 @@ void DPSxDcConverter::handleModbusMessages()
                     break;
                 }
             }
-            else
+            else if(m_activeMessageType == ModbusMessageType::WRITE)
             {
                 if(receiveRegisterWriteRsp(m_activeWriteRegister, m_activeWriteData))
                 {
@@ -291,6 +281,11 @@ void DPSxDcConverter::handleModbusMessages()
                     break;
                 }
             }
+            else // m_activeMessageType == ModbusMessageType::NONE
+            {
+                m_messageState = ModbusState::IDLE;
+                break;
+            }
 
             if(m_messageTimer.getDuration() >= DPSxDcConverterConfig::MESSAGE_TMO)
             {
@@ -302,17 +297,17 @@ void DPSxDcConverter::handleModbusMessages()
         }
 
         case ModbusState::ERROR:
-        clearRxLine(); // Flush any late-arriving stale response before next request
-        if(m_consecutiveErrors >= DPSxDcConverterConfig::CONSECUTIVE_ERRORS_THRESHOLD)
-        {
-            ESP_LOGE(TAG, "Too many consecutive errors: %d. Pausing...", m_consecutiveErrors);
-            m_pauseRetrying = true;
-            m_consecutiveErrors = 0;
-            m_errorRecoveryTimer.trigger();
-        }
-        m_messageState = ModbusState::IDLE;
-        m_messageTimer.reset();
-        break;
+            clearRxLine(); // Flush any late-arriving stale response before next request
+            if(m_consecutiveErrors >= DPSxDcConverterConfig::CONSECUTIVE_ERRORS_THRESHOLD)
+            {
+                ESP_LOGE(TAG, "Too many consecutive errors: %d. Pausing...", m_consecutiveErrors);
+                m_pauseRetrying = true;
+                m_consecutiveErrors = 0;
+                m_errorRecoveryTimer.trigger();
+            }
+            m_messageState = ModbusState::IDLE;
+            m_messageTimer.reset();
+            break;
     }
 }
 
