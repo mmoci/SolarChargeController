@@ -62,7 +62,7 @@ class DPSxMeasurements : public MeasurementsIf
     {
         const unsigned long age = measurementAge();
         const bool updated = (age < m_lastMeasurementAge || m_lastMeasurementAge == 0);
-        m_lastMeasurementAge = age; // always update so the next detection reliably sees a large previous value
+        m_lastMeasurementAge = age;
         return updated;
     }
 

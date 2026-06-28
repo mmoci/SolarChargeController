@@ -14,7 +14,7 @@ public:
     virtual void enableOutput(bool enable, bool priority = false) = 0;
     virtual bool isOutputEnabled() const = 0;
     virtual void applyControl(int controlValue) = 0;
-    virtual void setBatteryProfile(const BatteryProfile& /*profile*/) {}
+    virtual void setOverVoltageProtection(int maxVoltage_mV) {}
 
     virtual ControlMode getControlMode() const = 0;
     virtual int getMinControl() const = 0;

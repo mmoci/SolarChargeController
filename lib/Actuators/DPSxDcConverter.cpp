@@ -70,7 +70,7 @@ void DPSxDcConverter::enableOutput(bool enable, bool priority)
         return;
 
     enqueWriteRequest(Register::ON_OFF, static_cast<uint16_t>(enable), priority);
-    ESP_LOGI(TAG, "Output %s", enable ? "ENABLED" : "DISABLED");
+    ESP_LOGI(TAG, "Output %s requested", enable ? "ENABLED" : "DISABLED");
 }
 
 void DPSxDcConverter::applyControl(int controlValue) 
@@ -108,6 +108,8 @@ void DPSxDcConverter::updateOpenCircuitVoltage()
         {
             ESP_LOGD(TAG, "Output OFF but panel not present (Vin=%dmV) — skipping Voc capture", m_inVoltage_mV);
         }
+
+        m_outputStateChanged = false; // Reset the flag after processing the state change
     }
 }
 
@@ -116,13 +118,13 @@ ActuatorIf::ControlMode DPSxDcConverter::getControlMode() const
     return m_controlMode;
 }
 
-void DPSxDcConverter::setBatteryProfile(const BatteryProfile& profile)
+void DPSxDcConverter::setOverVoltageProtection(int maxVoltage_mV)
 {
     // Compute the hardware OVP ceiling from the battery max voltage + headroom.
     // This is the fallback if the software CV controller fails to limit voltage.
     // Clamped to the device maximum so an out-of-range profile cannot produce an
     // invalid Modbus register value.
-    const int requested = profile.maxVoltage_mV / 10 + DPSxDcConverterConfig::OVP_CEILING_HEADROOM_BITS;
+    const int requested = maxVoltage_mV / 10 + DPSxDcConverterConfig::OVP_CEILING_HEADROOM_BITS;
     const int clamped   = std::min(requested, DPSxDcConverterConfig::MAX_MPPT_VOLTAGE_CONTROL_VALUE);
 
     if (clamped != m_uSetVoltage_bits)
@@ -240,7 +242,7 @@ void DPSxDcConverter::handleModbusMessages()
                     m_outCurrent_mA = buffer[1];  // Different resolution IOUT: 0.001A/bit → 1 bit = 1mA
                     m_inVoltage_mV  = buffer[3] * 10;
 
-                    const OutputState prevOutputState = m_outputState;
+                    const OutputState prevOutputState {m_outputState};
                     m_outputState = (buffer[7] & 0x0001) ? OutputState::ON : OutputState::OFF;
                     m_outputStateChanged = (prevOutputState != m_outputState);
 

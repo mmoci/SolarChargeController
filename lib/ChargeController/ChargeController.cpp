@@ -12,11 +12,11 @@ void ChargeController::init()
         m_profileSelector->init();
         const BatteryProfile& profile = m_profileSelector->getCurrentProfile();
         m_batteryManager.init(profile);
-        m_actuator->setBatteryProfile(profile);
+        m_actuator->setOverVoltageProtection(profile.maxVoltage_mV);
 
         m_profileSelector->registerProfileObserver([this](const BatteryProfile& profile) {
             m_batteryManager.updateBatteryProfile(profile);
-            m_actuator->setBatteryProfile(profile);
+            m_actuator->setOverVoltageProtection(profile.maxVoltage_mV);
         });
     }
     else
@@ -24,7 +24,7 @@ void ChargeController::init()
         // No profile selector provided (e.g. unit tests with a fixed profile) — seed
         // BatteryManager with a safe default so it is always in a valid state.
         m_batteryManager.init(BatteryConfig::LI_ION_3S_DEFAULT);
-        m_actuator->setBatteryProfile(BatteryConfig::LI_ION_3S_DEFAULT);
+        m_actuator->setOverVoltageProtection(BatteryConfig::LI_ION_3S_DEFAULT.maxVoltage_mV);
     }
 
     // Actuator and corresponding MPPT strategy are already initialized by Initializer with a default profile, 
@@ -198,13 +198,13 @@ int ChargeController::computeDesiredSetpoint(MeasurementSnapshot snapshot)
             m_mpptStrategy->update(snapshot.pv);
             m_mpptControl = softRampControl(m_mpptStrategy->getMpptControl(), m_mpptStrategy->getMaxSoftRampStep());
         }
-        else if (!isOutputEnabled)
+        else if (!isOutputEnabled && m_wasOutputEnabled)
         {
             ESP_LOGD(TAG, "Output disabled — holding control at %.2f%%", m_mpptControl / static_cast<float>(MpptStrategyIf::MAX_CONTROL_VALUE) * 100);
         }   
         else if (!snapshot.measurementSettled)
         {
-            ESP_LOGD(TAG, "Current not settled — holding control at %.2f%%", m_mpptControl / static_cast<float>(MpptStrategyIf::MAX_CONTROL_VALUE) * 100);
+            ESP_LOGD(TAG, "Measurements not settled — holding control at %.2f%%", m_mpptControl / static_cast<float>(MpptStrategyIf::MAX_CONTROL_VALUE) * 100);
         }  
     }
 

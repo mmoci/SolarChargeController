@@ -83,7 +83,7 @@ class DPSxDcConverter : public Device, public ActuatorIf
     
     // ActuatorIf overrides
     ControlMode getControlMode() const override;
-    void setBatteryProfile(const BatteryProfile& profile) override;
+    void setOverVoltageProtection(int maxVoltage_mV) override;
     int getMinControl() const override;
     int getMaxControl() const override;
     bool hasMeasurements() const override;
@@ -167,7 +167,7 @@ class DPSxDcConverter : public Device, public ActuatorIf
     bool m_outputStateChanged{}; // Tracks whether the output state has changed since the last successful read, to trigger an urgent write if needed
     bool m_startupComplete{}; ///< Blocks Modbus until STARTUP_DELAY_MS has elapsed after init()
     bool m_measurementSettled{true};
-    int  m_uSetVoltage_bits{DPSxDcConverterConfig::MAX_MPPT_VOLTAGE_CONTROL_VALUE}; ///< Runtime U_SET target (device max until setBatteryProfile() is called)
+    int  m_uSetVoltage_bits{DPSxDcConverterConfig::MAX_MPPT_VOLTAGE_CONTROL_VALUE};
     uint8_t m_readsSinceLastWrite{};
     Timer m_messageTimer{};
     Timer m_startupTimer{};
