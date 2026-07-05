@@ -170,14 +170,13 @@ void BatteryManager::handleFaultMode(const Measurements& batteryMeasurements, bo
 
 void BatteryManager::handleChargingDisabledTimer(bool chargingAvailable)
 {
-    if(!chargingAvailable)
+    m_chargingDisabledTimer.update();
+
+    if(!chargingAvailable && chargingAvailable != m_chargingAvailable)
     {
-        if(chargingAvailable != m_chargingAvailable)
-            m_chargingDisabledTimer.trigger();
-        else
-            m_chargingDisabledTimer.update();
+        m_chargingDisabledTimer.trigger();
     }
-    else
+    else if(chargingAvailable && chargingAvailable != m_chargingAvailable)
     {
         m_chargingDisabledTimer.reset();
     }

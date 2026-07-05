@@ -38,13 +38,14 @@ void ChargeController::update()
     const auto measurementSnapshot{sampleMeasurements()};
 
     if(measurementSnapshot.pvValid)
-        updatePvAvailability(measurementSnapshot.pv, measurementSnapshot.battery);
+        updatePvPresence(measurementSnapshot.pv, measurementSnapshot.battery);
 
     if(measurementSnapshot.batteryValid)
-        m_batteryManager.update(measurementSnapshot.battery, m_isPvAvailable);
+        m_batteryManager.update(measurementSnapshot.battery, m_isPvPresent);
 
     handleBatteryChargingStates(m_batteryManager.isChargingAllowed(), m_batteryManager.isVoltageLimitActive());
 
+    // If charging is not allowed, skip MPPT updates and hold the last control value.
     if (!m_batteryManager.isChargingAllowed())
         return;
 
@@ -57,22 +58,17 @@ void ChargeController::update()
         m_mpptStrategy->syncControl(m_mpptControl);
 }
 
-bool ChargeController::updatePvAvailability(Measurements pvMeasurements, Measurements batteryMeasurements)
+void ChargeController::updatePvPresence(Measurements pvMeasurements, Measurements batteryMeasurements)
 {
     long pvPower_mW = static_cast<long>(pvMeasurements.voltage_mV) * pvMeasurements.current_mA / 1000;
-    const bool pvAvailable {(pvPower_mW > ChargeControllerConfig::PV_POWER_THRESHOLD) || 
-                            (pvMeasurements.voltage_mV > batteryMeasurements.voltage_mV + ChargeControllerConfig::PV_INPUT_HEADROOM_MV)};
-    bool availabilityChanged{false};
+    const bool isPvPresent {(pvMeasurements.voltage_mV > std::max(batteryMeasurements.voltage_mV, ChargeControllerConfig::PANEL_PRESENT_MIN_OUTPUT_VOLTAGE_mV)
+                            + ChargeControllerConfig::PANEL_PRESENT_VIN_HEADROOM_mV) || (pvPower_mW > ChargeControllerConfig::PANEL_PRESENT_MIN_OUTPUT_POWER_mW)};
 
-    if (m_isPvAvailable != pvAvailable)
-    {
-        ESP_LOGI(TAG, "PV input %s Vbatt (Vin=%dmV Vbatt=%dmV)", pvAvailable ? "above" : "below", pvMeasurements.voltage_mV, batteryMeasurements.voltage_mV);
-        availabilityChanged = true;
-    }
-        
-    m_isPvAvailable = pvAvailable;
+    if (isPvPresent != m_isPvPresent)
+        ESP_LOGI(TAG, "PV %s (Vin=%dmV Vbatt=%dmV Power=%ldmW)", isPvPresent ? "present" : "not present",
+                 pvMeasurements.voltage_mV, batteryMeasurements.voltage_mV, pvPower_mW);
 
-    return availabilityChanged;
+    m_isPvPresent = isPvPresent;
 }
 
 int ChargeController::clampLimitPI(int measured, int limit, int mpptControl, long& integralError)

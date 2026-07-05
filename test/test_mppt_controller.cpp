@@ -274,23 +274,25 @@ TEST_F(PerturbAndObserveMpptTest, CollapseGuard_IrradianceIncreaseClearsCeiling)
 // be set proactively to prevent the next step from crossing into collapse.
 //
 // Setup:
-//   Ramp to control=50 with {35000, 1500}: step=1 throughout (gradient=0.5→1)
-//   Inject {34750, 1520}: ΔV=-250mV < -KNEE_DELTA_VOLTAGE_THRESHOLD(-150)
-//                          ΔP = 34750×1520/1000 − 35000×1500/1000 = +320mW > 0
+//   Ramp to control=50 with {35000+i*15, 1500}: each step has ΔV=15mV ≥
+//   MIN_DELTA_VOLTAGE_mV so the counter increments every update, reaching 50
+//   consecutive min-steps. |dP/dV|=1.5 → step=int(0.75)=1=MIN_STEP throughout.
+//   Last ramp measurement: {35735, 1500}.
+//   Inject {35535, 1520}: ΔV=-200mV < -KNEE_DELTA_VOLTAGE_THRESHOLD(-150)
+//                          ΔP = 35535×1520/1000 − 35735×1500/1000 = +411mW > 0
 //                          → direction stays Up, knee fires: ceiling=50
 TEST_F(PerturbAndObserveMpptTest, KneeDetection_SetsProactiveCeiling)
 {
-    const Measurements normalM{35000, 1500};
     for(int i = 0; i < 50; ++i)
-        mppt.update(normalM);
+        mppt.update({35000 + i * 15, 1500});
     ASSERT_EQ(mppt.getMpptControl(), 50);
 
-    // Inject knee: ΔV=-250mV, ΔP=+320mW → direction stays Up, knee guard fires
-    mppt.update({34750, 1520});
+    // Inject knee relative to last ramp meas {35735,1500}: ΔV=-200mV, ΔP=+411mW
+    mppt.update({35535, 1520});
 
     // Control must not exceed the knee point even after many further updates
     for(int i = 0; i < 200; ++i)
-        mppt.update(normalM);
+        mppt.update({35000, 1500});
 
     EXPECT_LE(mppt.getMpptControl(), 50);
 }
@@ -300,18 +302,18 @@ TEST_F(PerturbAndObserveMpptTest, KneeDetection_SetsProactiveCeiling)
 // overshooting on the next Up phase.
 //
 // Setup:
-//   Ramp to control=50 with {35200, 1500}
-//   Inject {35100, 1498}: ΔV=-100mV, ΔP=-222mW < 0 → direction flips to Down
-//                          gradient=222/100=2.22 → step=1 → ceiling fires at 50
+//   Ramp to control=50 with {35200+i*15, 1500}: ΔV=15mV per step, builds
+//   m_consecutiveMinSteps to 50. Last ramp measurement: {35935, 1500}.
+//   Inject {35735, 1490}: ΔV=-200mV, ΔP=-657mW < 0 → direction flips to Down
+//                          gradient=3.29 → step=1=MIN_STEP → ceiling fires at 50
 TEST_F(PerturbAndObserveMpptTest, DirectionFlip_SetsProactiveCeiling)
 {
-    const Measurements normalM{35200, 1500};
     for(int i = 0; i < 50; ++i)
-        mppt.update(normalM);
+        mppt.update({35200 + i * 15, 1500});
     ASSERT_EQ(mppt.getMpptControl(), 50);
 
-    // Inject flip: ΔP=-222mW, ΔV=-100mV, step=1 → direction flips, ceiling set at 50
-    mppt.update({35100, 1498});
+    // Inject flip relative to last ramp meas {35935,1500}: ΔP=-657mW, ΔV=-200mV, step=1
+    mppt.update({35735, 1490});
     ASSERT_EQ(mppt.getMpptControl(), 49); // stepped down from peak
 
     // Control must never exceed the proactive ceiling during full recovery cycle
@@ -319,7 +321,7 @@ TEST_F(PerturbAndObserveMpptTest, DirectionFlip_SetsProactiveCeiling)
     int maxControl = mppt.getMpptControl();
     for(int i = 0; i < 200; ++i)
     {
-        mppt.update(normalM);
+        mppt.update({35200, 1500});
         maxControl = std::max(maxControl, mppt.getMpptControl());
     }
     EXPECT_LE(maxControl, 50);

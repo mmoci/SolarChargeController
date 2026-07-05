@@ -2,6 +2,7 @@
 #include "Arduino.h"
 #include "Logger.h"
 #include "MpptStrategyIf.h"
+#include "Config.h"
 
 static constexpr char TAG[] = "DPSxDcConverter";
 
@@ -97,8 +98,8 @@ void DPSxDcConverter::updateOpenCircuitVoltage()
     // Guards against storing backfeed voltage or noise as Voc when no panel is connected.
     if (m_outputState == OutputState::OFF && m_outputStateChanged && hasMeasurements())
     {
-        const bool panelPresent = (m_inVoltage_mV > std::max(m_outVoltage_mV, DPSxDcConverterConfig::PANEL_PRESENT_MIN_OUTPUT_VOLTAGE_mV)
-                                    + DPSxDcConverterConfig::PANEL_PRESENT_VIN_HEADROOM_mV);
+        const bool panelPresent = (m_inVoltage_mV > std::max(m_outVoltage_mV, ChargeControllerConfig::PANEL_PRESENT_MIN_OUTPUT_VOLTAGE_mV)
+                                    + ChargeControllerConfig::PANEL_PRESENT_VIN_HEADROOM_mV);
         if (panelPresent)
         {
             m_openCircuitVoltage_mV = getInVoltage_mV();
@@ -124,7 +125,7 @@ void DPSxDcConverter::setOverVoltageProtection(int maxVoltage_mV)
     // This is the fallback if the software CV controller fails to limit voltage.
     // Clamped to the device maximum so an out-of-range profile cannot produce an
     // invalid Modbus register value.
-    const int requested = maxVoltage_mV / 10 + DPSxDcConverterConfig::OVP_CEILING_HEADROOM_BITS;
+    const int requested = maxVoltage_mV / 10 + DPSxDcConverterConfig::VOLTAGE_HEADROOM_BITS;
     const int clamped   = std::min(requested, DPSxDcConverterConfig::MAX_MPPT_VOLTAGE_CONTROL_VALUE);
 
     if (clamped != m_uSetVoltage_bits)

@@ -118,6 +118,16 @@ class CircularBuffer
         return items;
     }
 
+    std::optional<T> getLastElement() const
+    {
+        std::size_t lastIndex = (m_index - 1 + MaxSize) % MaxSize;
+        if (!m_buffer[lastIndex].has_value())
+        {
+            return std::nullopt;
+        }
+        return m_buffer[lastIndex];
+    }
+
     const std::optional<T>& operator[](std::size_t index) const
     {
         static const std::optional<T> dummy{};

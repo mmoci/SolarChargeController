@@ -31,7 +31,10 @@ namespace ChargeControllerConfig
     static constexpr double Kp {1.0}; // Proportional gain for clampLimitPI — how aggressively to reduce MPPT control in response to over-limit measurements. Higher Kp reduces overshoot but can cause instability; lower Kp is more stable but allows larger excursions above the limit. Recommend starting with a modest value (e.g. 0.5 to 2.0) and tuning based on observed performance.
     static constexpr double Ki {0.01}; // Integral gain for clampLimitPI — how aggressively to accumulate error over time. Higher Ki eliminates steady-state error but can cause overshoot and instability; lower Ki is more stable but allows sustained excursions above the limit. Recommend starting with a small value (e.g. 0.001 to 0.1) and tuning based on observed performance.
     static constexpr long   MAX_INTEGRAL_ERROR {500};
-    
+
+    static constexpr int PANEL_PRESENT_MIN_OUTPUT_VOLTAGE_mV {5000}; // Floor for Vout comparison when output is unloaded or at startup
+    static constexpr int PANEL_PRESENT_VIN_HEADROOM_mV       {1000}; // Vin must exceed max(Vout, floor) by this margin to consider panel connected
+    static constexpr int PANEL_PRESENT_MIN_OUTPUT_POWER_mW   {1000}; // Minimum output power to consider panel present
 }
 
 namespace PvArrayConfig

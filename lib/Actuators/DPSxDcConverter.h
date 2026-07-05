@@ -50,21 +50,11 @@ namespace DPSxDcConverterConfig
     // When output is enabled, U_SET must always exceed the battery terminal voltage or DPS
     // cannot push current into the battery (Iout→0, MPPT sees P=0, system oscillates).
     // This headroom (in 0.01V/bit register units) ensures a minimum margin above Uout.
-    static constexpr int VOLTAGE_HEADROOM_BITS           {50};    // 50 × 0.01V/bit = 0.50V above battery voltage
-    // OVP ceiling headroom above battery maxVoltage (in 0.01V/bit units).
-    // U_SET = (battery maxVoltage_mV + headroom) / 10, acting as a hardware backstop.
-    // The software CV controller is the primary voltage limit; this fires only if the
-    // software fails. Tight enough to protect the battery, loose enough that normal
-    // CV regulation noise does not trigger it.
-    static constexpr int      OVP_CEILING_HEADROOM_BITS    {50};    // 50 × 0.01V/bit = 0.50V above battery maxVoltage
-    static constexpr uint16_t ERROR_RECOVERY_TMO           {10000}; // ms — pause duration after too many errors
-    static constexpr uint8_t  CONSECUTIVE_ERRORS_THRESHOLD {5};     // errors before triggering recovery pause
-
-    static constexpr uint16_t SETTLE_DELAY_MS                {500};
-
-    static constexpr int LOW_OUTPUT_CURRENT_THRESHOLD_mA     {100};  // Threshold for "hasLowOutputCurrent" condition in OCV refresh logic
-    static constexpr int PANEL_PRESENT_MIN_OUTPUT_VOLTAGE_mV {5000}; // Floor for Vout comparison when output is unloaded or at startup
-    static constexpr int PANEL_PRESENT_VIN_HEADROOM_mV       {1000}; // Vin must exceed max(Vout, floor) by this margin to consider panel connected
+    static constexpr int      VOLTAGE_HEADROOM_BITS           {50};    // 50 × 0.01V/bit = 0.50V above battery voltage
+    static constexpr uint16_t ERROR_RECOVERY_TMO              {10000}; // ms — pause duration after too many errors
+    static constexpr uint8_t  CONSECUTIVE_ERRORS_THRESHOLD    {5};     // errors before triggering recovery pause
+    static constexpr uint16_t SETTLE_DELAY_MS                 {500};   // ms — time after a setpoint write before the next read is accepted, to allow the DPS to respond to the new setpoint
+    static constexpr int      LOW_OUTPUT_CURRENT_THRESHOLD_mA {100};   // Threshold for "hasLowOutputCurrent" condition in OCV refresh logic
 };
 
 /**

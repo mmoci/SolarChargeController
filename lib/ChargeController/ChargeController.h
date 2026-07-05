@@ -10,7 +10,8 @@
 class ChargeController
 {
     public:
-    ChargeController(MeasurementsIf* pvMeasurements, MeasurementsIf* batteryMeasurements, ActuatorIf* actuator, MpptStrategyIf* mpptStrategy, BatteryProfileSelector* profileSelector = nullptr) :
+    ChargeController(MeasurementsIf* pvMeasurements, MeasurementsIf* batteryMeasurements, ActuatorIf* actuator, 
+                     MpptStrategyIf* mpptStrategy, BatteryProfileSelector* profileSelector = nullptr) :
         m_pvMeasurements{pvMeasurements},
         m_batteryMeasurements{batteryMeasurements},
         m_actuator{actuator},
@@ -44,9 +45,6 @@ class ChargeController
         bool measurementSettled{true}; // Output current matches set current within a small threshold, indicating that the system has stabilized after a change in control output
     };
 
-    // Used to determine if charging is available (PV input vs battery voltage)
-    bool m_isPvAvailable{false};
-
     // PI (Proportional & Integral) variables containing cumulative integral error
     long m_voltageIntegralError{};
     long m_currentIntegralError{};
@@ -71,7 +69,10 @@ class ChargeController
     // the output was off from being applied immediately on re-enable.
     bool m_wasOutputEnabled{false};
 
-    bool updatePvAvailability(Measurements pvMeasurements, Measurements batteryMeasurements);
+    // Tracks whether PV is present, updated each cycle based on PV and battery measurements.
+    bool m_isPvPresent{false};
+
+    void updatePvPresence(Measurements pvMeasurements, Measurements batteryMeasurements);
     int clampLimitPI(int measured, int limit, int mpptControl, long& integralError);
     int softRampControl(int targetControl, int stepSize);
     void handleBatteryChargingStates(bool chargingAllowed, bool isVoltageLimitActive);
