@@ -69,15 +69,12 @@ void setup()
     ESP_LOGI(TAG, "Initialising MQTT client...");
     mqttClient.init();
     ESP_LOGI(TAG, "mqttClient.init() done");
-    #endif
-
-    #ifdef MQTT_CLIENT
     bridge.init();
     ESP_LOGI(TAG, "bridge.init() done");
     #endif
 
     Initializer::getInstance().init();
-    ESP_LOGI(TAG, "hardware.init() done");
+    ESP_LOGI(TAG, "Hardware config init() done");
 
     controller.init();
     ESP_LOGI(TAG, "controller.init() done");
@@ -111,6 +108,15 @@ void loop()
 
     if(millis() - sdLogger.getLastFlushTime() >= SdLogger::FLUSH_INTERVAL_MS)
         sdLogger.flush();
+    
+    if(controller.isPvDisconnected())
+    {
+        #ifdef MQTT_CLIENT
+        mqttClient.publish(AVAILABILITY_TOPIC, "offline", true);
+        #endif
+        ESP_LOGI(TAG, "System ready for deep sleep — entering sleep mode for %llu seconds", ChargeControllerConfig::DEFAULT_DEEP_SLEEP_DURATION_S);
+        controller.requestDeepSleep();
+    }
 
     delay(3);
 }

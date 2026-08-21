@@ -4,7 +4,8 @@
 static constexpr char TAG[] = "SensorINA226";
 
 SensorINA226::SensorINA226(uint16_t deviceAddress, int shunt_mOhm) : 
-    SensorI2C(deviceAddress), m_shunt_mOhm{shunt_mOhm}
+    SensorINAIf(deviceAddress), 
+    m_shunt_mOhm{shunt_mOhm}
 {}
 
 void SensorINA226::init()
@@ -17,11 +18,11 @@ void SensorINA226::init()
         return;
     }
 
-    configureCalibration();
-    setConfiguration();
+    setShuntCalibrationRegister();
+    setConfigurationRegister();
 }
 
-void SensorINA226::configureCalibration()
+void SensorINA226::setShuntCalibrationRegister()
 {
     // INA226 datasheet formula: 
     // External shunt used to develop the differential voltage across the input pins.
@@ -36,11 +37,11 @@ void SensorINA226::configureCalibration()
     writeRegisterBytes(static_cast<uint16_t>(Registers::Calibration), data, REGISTERS_SIZE_IN_BYTES);
 }
 
-void SensorINA226::setConfiguration()
+void SensorINA226::setConfigurationRegister(uint16_t configValue)
 {
     uint8_t data[REGISTERS_SIZE_IN_BYTES]{};
-    data[0] = static_cast<uint8_t>((CONFIG_DEFAULT >> 8) & 0xFF);
-    data[1] = static_cast<uint8_t>(CONFIG_DEFAULT & 0xFF);
+    data[0] = static_cast<uint8_t>((configValue >> 8) & 0xFF);
+    data[1] = static_cast<uint8_t>(configValue & 0xFF);
 
     writeRegisterBytes(static_cast<uint16_t>(Registers::Config), data, REGISTERS_SIZE_IN_BYTES);
 }

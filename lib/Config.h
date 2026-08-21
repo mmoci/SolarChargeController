@@ -14,6 +14,12 @@ namespace SensorConfig
         constexpr int BATTERY_SHUNT_mOhm = 10; // mΩ
     }
 
+    namespace SensorINA228
+    {
+        constexpr int PV_SHUNT_mOhm      = 2; // mΩ
+        constexpr int BATTERY_SHUNT_mOhm = 2; // mΩ
+    }
+
     // INA226 I2C addresses are set by A0/A1 pins (0x40–0x4F).
     // A0=GND, A1=GND -> 0x40   |   A0=VS, A1=GND -> 0x41
     // Adjust to match the hardware pin strapping on each sensor board.
@@ -35,6 +41,8 @@ namespace ChargeControllerConfig
     static constexpr int PANEL_PRESENT_MIN_OUTPUT_VOLTAGE_mV {5000}; // Floor for Vout comparison when output is unloaded or at startup
     static constexpr int PANEL_PRESENT_VIN_HEADROOM_mV       {1000}; // Vin must exceed max(Vout, floor) by this margin to consider panel connected
     static constexpr int PANEL_PRESENT_MIN_OUTPUT_POWER_mW   {1000}; // Minimum output power to consider panel present
+
+    static constexpr unsigned long long DEFAULT_DEEP_SLEEP_DURATION_S {600}; // Default deep sleep duration in seconds (10 minutes)
 }
 
 namespace PvArrayConfig

@@ -164,3 +164,33 @@ inline std::string floatToString(float value, int precision = 2)
     oss << std::fixed << std::setprecision(precision) << value;
     return oss.str();
 }
+
+//-----------------------------
+// Bit manipulation utilities
+//-----------------------------
+
+template <typename T>
+inline void setBit(T& value, uint8_t bitPosition, bool setClear)
+{
+    if (setClear)
+        value |= (T{1} << bitPosition);
+    else
+        value &= ~(T{1} << bitPosition);
+}
+
+template <typename T>
+inline void setBits(uint8_t fromBit, uint8_t toBit, T& reg, T newValue)
+{
+    T mask{};
+    if (toBit - fromBit + 1 == std::numeric_limits<T>::digits)
+        mask = ~T{0};
+    else
+        mask = ((T{1} << (toBit - fromBit + 1)) - 1) << fromBit;
+
+    reg = (reg & ~mask) | ((newValue << fromBit) & mask);
+}
+
+inline bool isBitSet(uint16_t value, uint8_t bitPosition)
+{
+    return (value & (1 << bitPosition)) != 0;
+}

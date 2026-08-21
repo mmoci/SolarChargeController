@@ -1,75 +1,17 @@
 #pragma once
 
-#include "Config.h"
-#include "Device.h"
-#include "SensorI2C.h"
+#include "SensorINAIf.h"
 #include "MeasurementsIf.h"
+#include "Config.h"
 
-class SensorINA226 : public Device, public SensorI2C, public MeasurementsIf
+class SensorINA226 : public SensorINAIf
 {
     public:
     SensorINA226(uint16_t deviceAddress, int shunt_mOhm = SensorConfig::SensorINA226::PV_SHUNT_mOhm);
 
-    /**
-     * @brief Provides basic setup for the sensor during Arduino setup phase.
-     */
+    // Device overrides
     void init() override;
-
-    /**
-     * @brief Provides sensor update during Arduino loop execution.
-     */
     void update() override;
-
-    /**
-     * @brief Get the Current
-     * 
-     * @return int Returns current value in [mA]
-     */
-    int getCurrent_mA() const override {return m_current_mA;};
-
-    /**
-     * @brief Get the Bus Voltage
-     * 
-     * @return int Returns Bus Voltage values in [mV]
-     */
-    int getVoltage_mV() const override {return m_voltage_mV;}
-
-    /**
-     * @brief Returns false if the device is not connected or if no successful
-     *        I2C read has completed within STALE_TIMEOUT_MS.
-     */
-    bool isMeasurementValid() const override
-    {
-        if (!m_isConnected) return false;
-        return (millis() - m_lastUpdateTime) < STALE_TIMEOUT_MS;
-    }
-
-    /**
-     * @brief Returns milliseconds elapsed since the last successful I2C read.
-     */
-    unsigned long measurementAge() const override
-    {
-        return millis() - m_lastUpdateTime;
-    }
-
-    /**
-     * @brief Returns true if the measurement has been updated since the last check.
-     * 
-     * @return true 
-     * @return false 
-     */
-    bool isMeasurementUpdated() override
-    {
-        const unsigned long age = measurementAge();
-        const bool updated = (age < m_lastMeasurementAge || m_lastMeasurementAge == 0);
-        m_lastMeasurementAge = age; // always update so the next detection reliably sees a large previous value
-        return updated;
-    }
-
-    bool isMeasurementSettled() const override
-    {
-        return true; // INA226 does not have a current settling time, so we assume it's always settled
-    }
 
     private:
     /**
@@ -109,17 +51,8 @@ class SensorINA226 : public Device, public SensorI2C, public MeasurementsIf
         Calibration = 0x05
     };
 
-    int m_voltage_mV{};
-    int m_current_mA{};
+    void setShuntCalibrationRegister() override;
+    void setConfigurationRegister(uint16_t configValue = CONFIG_DEFAULT) override;
+
     int m_shunt_mOhm{};
-    unsigned long m_lastUpdateTime{};
-    unsigned long m_lastMeasurementAge{};
-
-    // If no successful read arrives within this window the measurement is
-    // considered stale. INA226 reads every ~6ms so 100ms gives ~16x headroom
-    // for transient I2C hiccups before the controller reacts.
-    static constexpr unsigned long STALE_TIMEOUT_MS{100};
-
-    void configureCalibration();
-    void setConfiguration();
 };

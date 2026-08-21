@@ -21,9 +21,10 @@ class ChargeController
 
     void init();
     void update();
-
     BatteryManager::Mode getBatteryMode() const { return m_batteryManager.getMode(); }
     int getMpptControl() const { return m_mpptControl; }
+    bool isPvDisconnected() const { return !m_batteryManager.isChargingAllowed() && !m_isPvPresent; }
+    void requestDeepSleep(unsigned long long duration_s = ChargeControllerConfig::DEFAULT_DEEP_SLEEP_DURATION_S);
 
     private:
     // Pointers to hardware interfaces, injected via constructor for flexibility and testability

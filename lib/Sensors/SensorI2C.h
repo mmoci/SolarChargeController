@@ -5,6 +5,10 @@
 
 class SensorI2C
 {
+    public:
+    SensorI2C(std::uint16_t address) : m_deviceAddress{address} 
+    {}
+
     protected:
     std::uint16_t m_deviceAddress{};
     bool m_isConnected{};
@@ -14,8 +18,4 @@ class SensorI2C
     bool readBytes(std::uint8_t* buffer, std::size_t nrOfBytes, bool stop = true);
     bool readRegisterBytes(std::uint16_t registerAddress, std::uint8_t* buffer, std::size_t nrOfBytes, bool stop = false);
     bool i2cDevicePresent();
-
-    public:
-    SensorI2C(std::uint16_t address) : m_deviceAddress{address} 
-    {}
 };

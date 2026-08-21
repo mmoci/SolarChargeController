@@ -58,6 +58,13 @@ void ChargeController::update()
         m_mpptStrategy->syncControl(m_mpptControl);
 }
 
+void ChargeController::requestDeepSleep(unsigned long long duration_s)
+{
+    ESP_LOGI(TAG, "Requesting deep sleep for %llu seconds", duration_s);
+    esp_sleep_enable_timer_wakeup(duration_s * 1000000ULL); // Convert seconds to microseconds
+    esp_deep_sleep_start();
+}
+
 void ChargeController::updatePvPresence(Measurements pvMeasurements, Measurements batteryMeasurements)
 {
     long pvPower_mW = static_cast<long>(pvMeasurements.voltage_mV) * pvMeasurements.current_mA / 1000;
@@ -108,13 +115,12 @@ void ChargeController::handleBatteryChargingStates(bool isChargingAllowed, bool 
 {
     if (!m_wasChargingAllowed && isChargingAllowed)
     {
-        ESP_LOGI(TAG, "Battery charging started");
-        resetMpptStrategy();
+        ESP_LOGI(TAG, "Battery charging started, enabling output");
         m_actuator->enableOutput(true); // Enable output on every charge-start transition (startup, recharge after full battery, etc.)
     }
     else if (m_wasChargingAllowed && !isChargingAllowed)
     {
-        ESP_LOGI(TAG, "Battery charging stopped");
+        ESP_LOGI(TAG, "Battery charging stopped, disabling output");
         m_actuator->enableOutput(false, true); // Urgent: preempt any pending writes to immediately cut output
         m_actuator->applyControl(0);           // Reset setpoint to 0 so MPPT restarts clean from 0% on next charge cycle
     }
