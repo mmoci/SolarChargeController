@@ -20,6 +20,8 @@ void SensorINA228::init()
 
     setShuntCalibrationRegister();
     setConfigurationRegister(CONFIG_DEFAULT);
+    setDiagnosticAlertRegister(DIAG_ALERT_DEFAULT);
+    setOvervoltageThreshold(WAKEUP_THRESHOLD_DEFAULT);
 }
 
 void SensorINA228::update()
@@ -97,4 +99,22 @@ void SensorINA228::setShuntCalibrationRegister()
     data[1] = static_cast<uint8_t>(calibration & 0xFF);        // Low byte
 
     writeRegisterBytes(static_cast<uint16_t>(Registers::SHUNT_CAL), data, RegisterSize::SHUNT_CAL);
+}
+
+void SensorINA228::setDiagnosticAlertRegister(uint16_t diagAlertValue)
+{
+    uint8_t data[RegisterSize::DIAG_ALERT]{};
+    data[0] = static_cast<uint8_t>((diagAlertValue >> 8) & 0xFF); // High byte
+    data[1] = static_cast<uint8_t>(diagAlertValue & 0xFF);        // Low byte
+
+    writeRegisterBytes(static_cast<uint16_t>(Registers::DIAG_ALERT), data, RegisterSize::DIAG_ALERT);
+}
+
+void SensorINA228::setOvervoltageThreshold(uint16_t ovThreshold)
+{
+    uint8_t data[RegisterSize::BOVL]{};
+    data[0] = static_cast<uint8_t>((ovThreshold >> 8) & 0xFF); // High byte
+    data[1] = static_cast<uint8_t>(ovThreshold & 0xFF);        // Low byte
+
+    writeRegisterBytes(static_cast<uint16_t>(Registers::BOVL), data, RegisterSize::BOVL);
 }

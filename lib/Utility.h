@@ -170,12 +170,12 @@ inline std::string floatToString(float value, int precision = 2)
 //-----------------------------
 
 template <typename T>
-inline void setBit(T& value, uint8_t bitPosition, bool setClear)
+inline void setBit(T& reg, uint8_t bitPosition, bool setClear)
 {
     if (setClear)
-        value |= (T{1} << bitPosition);
+        reg |= (T{1} << bitPosition);
     else
-        value &= ~(T{1} << bitPosition);
+        reg &= ~(T{1} << bitPosition);
 }
 
 template <typename T>

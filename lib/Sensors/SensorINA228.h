@@ -13,17 +13,27 @@ class SensorINA228 : public SensorINAIf
     void update() override;
 
     private:
-    static constexpr int      MAX_CURRENT_A      {20};                       // Maximum expected current in Amperes
-    static constexpr double   CURRENT_LSB        {MAX_CURRENT_A / 524288.0}; // Current_LSB = Maximum Expected Current / pow(2, 19) (20-bit register)
-    static constexpr float    VOLTAGE_LSB_mV     {0.1953125f};               // 195.3125 µV/LSB
-    static constexpr uint16_t CONFIG_DEFAULT     {0x0000};                   // Default configuration value for configuration register
-    static constexpr uint16_t ADC_CONFIG_DEFAULT {0xFB68};                   // Default ADC configuration value
+    static constexpr int      MAX_CURRENT_A        {20};                       // Maximum expected current in Amperes
+    static constexpr double   CURRENT_LSB          {MAX_CURRENT_A / 524288.0}; // Current_LSB = Maximum Expected Current / pow(2, 19) (20-bit register)
+    static constexpr float    VOLTAGE_LSB_mV       {0.1953125f};               // 195.3125 µV/LSB
+    static constexpr uint16_t CONFIG_DEFAULT       {0x0000};                   // Default configuration value for configuration register
+    static constexpr uint16_t ADC_CONFIG_DEFAULT   {0xFB68};                   // Default ADC configuration value
+    static constexpr uint16_t DIAG_ALERT_DEFAULT   {0x8000};                   // Default diagnostic alert value
+    static constexpr float    BOVL_LSB_mV          {3.125f};                   // BOVL/BUVL threshold register LSB
+    static constexpr uint16_t WAKEUP_THRESHOLD_DEFAULT
+        {static_cast<uint16_t>(PvArrayConfig::DEFAULT_OPEN_CIRCUIT_VOLTAGE_mV *
+        PvArrayConfig::WAKEUP_THRESHOLD_PERCENT / 100 / BOVL_LSB_mV)};
 
     struct RegisterSize
     {
         static constexpr uint8_t CONFIG     {2}; // Bytes
         static constexpr uint8_t ADC_CONFIG {2}; // Bytes
         static constexpr uint8_t SHUNT_CAL  {2}; // Bytes
+        static constexpr uint8_t DIAG_ALERT {2}; // Bytes
+        static constexpr uint8_t SOVL       {2}; // Bytes
+        static constexpr uint8_t SUVL       {2}; // Bytes
+        static constexpr uint8_t BOVL       {2}; // Bytes
+        static constexpr uint8_t BUVL       {2}; // Bytes
         static constexpr uint8_t V_SHUNT    {3}; // Bytes
         static constexpr uint8_t V_BUS      {3}; // Bytes
         static constexpr uint8_t POWER      {3}; // Bytes
@@ -60,6 +70,8 @@ class SensorINA228 : public SensorINAIf
     void setShuntCalibrationRegister() override;
     void setConfigurationRegister(uint16_t configValue = CONFIG_DEFAULT) override;
     void setADCConfigurationRegister(uint16_t adcConfigValue = ADC_CONFIG_DEFAULT);
+    void setDiagnosticAlertRegister(uint16_t diagAlertValue = DIAG_ALERT_DEFAULT);
+    void setOvervoltageThreshold(uint16_t ovThreshold = WAKEUP_THRESHOLD_DEFAULT);
 
     int m_shunt_mOhm{};
 };

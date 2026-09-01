@@ -49,6 +49,7 @@ namespace PvArrayConfig
 {
     static constexpr int DEFAULT_OPEN_CIRCUIT_VOLTAGE_mV {49000};
     static constexpr int VOLTAGE_COLLAPSE_THRESHOLD_PERCENT {78};
+    static constexpr int WAKEUP_THRESHOLD_PERCENT {75};
 }
 
 namespace BatteryConfig
